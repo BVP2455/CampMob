@@ -1,0 +1,2317 @@
+<?xml version="1.0" encoding="utf-8"?>
+<model version="NetLogo 7.0.4" snapToGrid="true">
+  <code><![CDATA[extensions [ gis ]
+
+globals 
+[ 
+  buildings
+  roads
+  zones
+  busway
+  footway
+  motorway
+  pedestrianway
+  bicycleway
+
+  nodes-dataset
+  edges-dataset
+  
+  origin-point
+  destination-point
+  selected-path
+  
+  sim-time-seconds
+  seconds-per-tick
+  meters-per-netlogo-unit
+  
+  vehicle-safety-distance
+  intersection-safety-distance
+  movement-step-size
+  
+  simulation-duration-seconds
+  last-vehicle-generation-time
+  generated-vehicles
+  completed-trips
+  failed-paths
+  
+  right-priority-radius
+  roundabout-priority-radius
+  deadlock-release-time
+  
+  route-pool
+  route-pool-target-size
+]
+
+breed [ vehicles vehicle ]
+breed [ pedestrians pedestrian ]
+breed [ bicycles bicycle ]
+breed [ buses bus ]
+
+breed [ nodes node ]
+breed [ waypoints waypoint ]
+directed-link-breed [ edges edge ]
+
+nodes-own [
+  node-id
+  lane-direction
+  node-key
+  dist
+  previous
+  visited?
+  intersection?
+  roundabout-node?
+]
+
+waypoints-own [
+  lane-direction
+  road-id
+  dist
+  previous
+  visited?
+]
+
+edges-own [
+  road-type
+  road-length
+  edge-road-id
+  allowed-modes
+  roundabout?
+]
+
+turtles-own [
+  current-node
+  next-node
+  previous-node
+  destination-node
+  path
+  speed
+  speed-factor
+  arrived?
+  stopped?
+  agent-mode
+  waiting-time
+]
+
+vehicles-own [
+]
+
+buses-own [
+]
+
+bicycles-own [
+]
+
+to setup
+  clear-all
+  
+  set origin-point nobody
+  set destination-point nobody
+  set selected-path []
+
+  set sim-time-seconds 0
+  set seconds-per-tick 0.2
+  set meters-per-netlogo-unit 5
+  
+  set vehicle-safety-distance 0.12
+  set intersection-safety-distance 0.10
+  set movement-step-size 0.03
+  
+  set simulation-duration-seconds simulation-duration-minutes * 60
+  set last-vehicle-generation-time (- vehicle-generation-interval-seconds)
+  set generated-vehicles 0
+  set completed-trips 0
+  set failed-paths 0
+  
+  set right-priority-radius 0.30
+  set roundabout-priority-radius 0.35
+  set deadlock-release-time 4
+  
+  set route-pool []
+  set route-pool-target-size 25
+  
+  load-gis
+  draw-gis
+  load-graph-from-shp
+  reset-ticks
+end
+
+to load-gis
+  set buildings gis:load-dataset "data/Gross_data/Buildings_gross.shp"
+  set roads gis:load-dataset "data/Gross_data/Roads_gross.shp"
+  set zones gis:load-dataset "data/Gross_data/zone.shp"
+
+  set nodes-dataset gis:load-dataset "dataNetlogo/Netlogo_nodes.shp"
+  set edges-dataset gis:load-dataset "dataNetlogo/ultimo_roads.shp"
+
+  gis:set-world-envelope
+  (gis:envelope-union-of
+    (gis:envelope-of zones)
+    (gis:envelope-of nodes-dataset)
+    (gis:envelope-of edges-dataset))
+end
+
+to draw-gis
+  ask patches [
+    set pcolor white
+  ]
+
+  gis:set-drawing-color green
+  gis:draw zones 5
+
+  gis:set-drawing-color gray
+  gis:fill buildings 1
+
+  gis:set-drawing-color black
+  gis:draw buildings 1
+
+end
+
+to load-graph-from-shp
+  load-nodes
+  load-full-edges-by-geometry
+  create-turn-connectors
+  identify-traffic-nodes
+end
+
+to-report mobile-agents
+  report (turtle-set vehicles buses bicycles pedestrians)
+end
+
+to setup-mobile-agent [mode origin destination new-path]
+  set agent-mode mode
+  set current-node origin
+  move-to current-node
+  set destination-node destination
+  set path new-path
+  set previous-node nobody
+  set next-node nobody
+  set speed-factor bounded-random-normal 1 0.15 0.6 1.4
+  set speed kmh-to-netlogo-speed (speed-kmh-from-mode mode * speed-factor)
+  set stopped? false
+  set arrived? false
+  set waiting-time 0
+end
+
+to-report speed-kmh-from-mode [mode]
+  if mode = "car" [ report vehicle-speed-kmh ]
+  if mode = "bus" [ report 20 ]
+  if mode = "bike" [ report 15 ]
+  if mode = "pedestrian" [ report 5 ]
+  report vehicle-speed-kmh
+end
+
+to create-mobile-agent [mode origin destination new-path]
+  if mode = "car" [
+    create-vehicles 1 [
+      set color yellow
+      set size 0.5
+      set shape "car"
+      setup-mobile-agent mode origin destination new-path
+    ]
+    stop
+  ]
+
+  if mode = "bus" [
+    create-buses 1 [
+      set color blue
+      set size 0.8
+      set shape "bus"
+      setup-mobile-agent mode origin destination new-path
+    ]
+    stop
+  ]
+
+  if mode = "bike" [
+    create-bicycles 1 [
+      set color pink
+      set size 0.5
+      set shape "wheel"
+      setup-mobile-agent mode origin destination new-path
+    ]
+    stop
+  ]
+
+  if mode = "pedestrian" [
+    create-pedestrians 1 [
+      set color orange
+      set size 0.3
+      set shape "person"
+      setup-mobile-agent mode origin destination new-path
+    ]
+    stop
+  ]
+end
+
+to identify-traffic-nodes
+  ask nodes [
+    let real-in count my-in-edges with [road-type != "turn"]
+    let real-out count my-out-edges with [road-type != "turn"]
+
+    set intersection? (real-in + real-out >= 3)
+
+    set roundabout-node?
+      ((any? my-in-edges with [roundabout?]) or
+       (any? my-out-edges with [roundabout?]))
+
+    if intersection? [
+      set size 0.11
+    ]
+
+    if roundabout-node? [
+      set size 0.13
+    ]
+  ]
+end
+
+to load-nodes
+  let id-counter 0
+
+  foreach gis:feature-list-of nodes-dataset [
+    feat ->
+
+    let coords gis:location-of (first (first (gis:vertex-lists-of feat)))
+
+    if not empty? coords [
+      let k coord-key coords
+
+      create-nodes 1 [
+        set node-id id-counter
+        set node-key k
+        set lane-direction "forward"
+        setxy item 0 coords item 1 coords
+        set color cyan
+        set size 0.08
+        set shape "circle"
+      ]
+
+      create-nodes 1 [
+        set node-id id-counter
+        set node-key k
+        set lane-direction "backward"
+        setxy item 0 coords item 1 coords
+        set color blue
+        set size 0.08
+        set shape "circle"
+      ]
+
+      set id-counter id-counter + 1
+    ]
+  ]
+end
+
+to load-full-edges-by-geometry
+  foreach gis:feature-list-of edges-dataset [
+    feat ->
+    
+    let mode allowed-modes-from-feature feat
+    let direction-value word gis:property-value feat "ONEWAY_" ""
+    let round-value word gis:property-value feat "ISROUND_" ""
+    let current-road-id gis:property-value feat "ID_"
+
+    foreach gis:vertex-lists-of feat [
+      vlist ->
+
+      let loc-list []
+
+      foreach vlist [
+        v ->
+        let loc gis:location-of v
+
+        if not empty? loc [
+          set loc-list lput loc loc-list
+        ]
+      ]
+
+      if length loc-list >= 2 [
+
+        ifelse round-value = "true" [
+          create-road-path loc-list current-road-id "forward" "roundabout" mode
+        ]
+        [
+          if direction-value = "yes" [
+            create-road-path loc-list current-road-id "forward" "oneway" mode
+          ]
+
+          if direction-value = "" or direction-value = "no" [
+            create-road-path loc-list current-road-id "forward" "two-way-forward" mode
+            create-road-path reverse loc-list current-road-id "backward" "two-way-backward" mode
+          ]
+        ]
+      ]
+    ]
+  ]
+end
+
+to create-road-path [loc-list current-road-id lane-dir link-type mode]
+
+  let previous-agent nobody
+  let i 0
+
+  foreach loc-list [
+    loc ->
+
+    let current-agent nobody
+
+    ifelse i = 0 or i = (length loc-list - 1)
+    [
+      set current-agent node-at-location loc lane-dir
+    ]
+    [
+      create-waypoints 1 [
+        setxy item 0 loc item 1 loc
+        set lane-direction lane-dir
+        set road-id current-road-id
+        set color gray
+        set size 0.06
+        set shape "circle"
+        set current-agent self
+      ]
+    ]
+
+    if previous-agent != nobody and current-agent != nobody [
+      connect-graph-agents previous-agent current-agent link-type current-road-id mode
+    ]
+
+    set previous-agent current-agent
+    set i i + 1
+  ]
+end
+
+to connect-graph-agents [a b link-type current-road-id mode]
+
+  let d [distance b] of a
+
+  ask a [
+    if not out-link-neighbor? b [
+      create-edge-to b [
+        set color edge-color-from-modes mode
+        set thickness 0.012
+        set road-type link-type
+        set edge-road-id current-road-id
+        set road-length d
+        set allowed-modes mode
+        set roundabout? link-type = "roundabout"
+      ]
+    ]
+  ]
+end
+
+to-report flatten-modes [mode-lists]
+  let result []
+
+  foreach mode-lists [
+    lst ->
+    set result sentence result lst
+  ]
+
+  report remove-duplicates result
+end
+
+to-report common-modes [list-a list-b]
+  let result []
+
+  foreach list-a [
+    m ->
+    if member? m list-b [
+      set result lput m result
+    ]
+  ]
+
+  report remove-duplicates result
+end
+
+to-report allowed-modes-from-feature [feat]
+
+  let type-value word gis:property-value feat "TYPE_" ""
+  let category-value word gis:property-value feat "CATEGORY_" ""
+  let is-bus-value word gis:property-value feat "ISOPBUS_" ""
+  let bus-routes word gis:property-value feat "BUSRTS_" ""
+
+  let mode []
+
+  if type-value = "busway" or is-bus-value = "true" or bus-routes != "[]" [
+    set mode lput "bus" mode
+  ]
+
+  if category-value = "road" and type-value != "busway" [
+    set mode lput "car" mode
+  ]
+
+  if category-value = "cycleway" [
+    set mode lput "bike" mode
+  ]
+
+  if category-value = "pedestrian" or
+     type-value = "footway" or
+     type-value = "path" or
+     type-value = "steps" or
+     type-value = "platform" [
+    set mode lput "pedestrian" mode
+  ]
+
+  if empty? mode [
+    set mode ["car"]
+  ]
+  report remove-duplicates mode
+end
+
+to-report edge-color-from-modes [mode]
+
+  if member? "bus" mode and not member? "car" mode and not member? "bike" mode and not member? "pedestrian" mode [
+    report blue
+  ]
+
+  if member? "bike" mode and not member? "car" mode and not member? "bus" mode and not member? "pedestrian" mode [
+    report pink
+  ]
+
+  if member? "pedestrian" mode and not member? "car" mode and not member? "bus" mode and not member? "bike" mode [
+    report orange
+  ]
+
+  if member? "car" mode and not member? "bus" mode and not member? "bike" mode and not member? "pedestrian" mode [
+    report red
+  ]
+
+  if length mode > 1 [
+    report violet
+  ]
+
+  report black
+end
+
+to create-turn-connectors
+
+  ask edges with [road-type = "turn"] [
+    die
+  ]
+
+  let keys remove-duplicates [node-key] of nodes
+
+  foreach keys [
+    k ->
+
+    let intersection-nodes nodes with [
+      node-key = k
+    ]
+
+    let arrival-nodes intersection-nodes with [
+      any? my-in-edges with [road-type != "turn"]
+    ]
+
+    let departure-nodes intersection-nodes with [
+      any? my-out-edges with [road-type != "turn"]
+    ]
+
+    ask arrival-nodes [
+      let arrival self
+
+      let arrival-modes flatten-modes [allowed-modes] of my-in-edges with [
+        road-type != "turn"
+      ]
+
+      ask departure-nodes with [self != arrival] [
+        let departure self
+
+        let departure-modes flatten-modes [allowed-modes] of my-out-edges with [
+          road-type != "turn"
+        ]
+
+        let turn-modes common-modes arrival-modes departure-modes
+
+        if not empty? turn-modes [
+          ask arrival [
+            if not out-link-neighbor? departure [
+              create-edge-to departure [
+                set color edge-color-from-modes turn-modes
+                set thickness 0.008
+                set road-type "turn"
+                set edge-road-id "turn"
+                set road-length 0.01
+                set allowed-modes turn-modes
+                set roundabout? false
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+end
+
+to-report coord-key [loc]
+  let x item 0 loc
+  let y item 1 loc
+  report (word precision x 6 "," precision y 6)
+end
+
+to-report node-at-location [loc lane-dir]
+  let k coord-key loc
+  let candidates nodes with [
+    node-key = k and lane-direction = lane-dir
+  ]
+
+  if any? candidates [
+    report one-of candidates
+  ]
+
+  let x item 0 loc
+  let y item 1 loc
+
+  let fallback min-one-of nodes with [lane-direction = lane-dir] [
+    distancexy x y
+  ]
+
+  report fallback
+end
+
+to create.vehicles
+  let valid-start-points (turtle-set nodes waypoints) with [
+    any? my-out-edges with [
+      member? "car" allowed-modes
+    ]
+  ]
+
+  if not any? valid-start-points [
+    user-message "No hay puntos con links salientes. Revisa la creación de edges."
+    stop
+  ]
+
+  create-vehicles number-of-vehicles [
+    set color yellow
+    set size 0.5
+    set shape "car"
+    set agent-mode "car"
+
+    set current-node one-of valid-start-points
+    move-to current-node
+
+    set previous-node nobody
+    set next-node nobody
+    set destination-node nobody
+    set path []
+    
+    set speed-factor bounded-random-normal 1 0.15 0.6 1.4
+    set speed kmh-to-netlogo-speed (vehicle-speed-kmh * speed-factor)
+    set arrived? false
+    set stopped? false
+    set waiting-time 0
+  ]
+end
+
+to-report vehicle-ahead-on-same-segment? [target]
+
+  let my-current current-node
+  let my-target target
+  let my-distance-to-target distance target
+
+  report any? other mobile-agents with [
+    current-node = my-current and
+    next-node = my-target and
+    distance my-target < my-distance-to-target and
+    distance myself < vehicle-safety-distance
+  ]
+end
+
+to-report target-node-busy? [target]
+  report false
+end
+
+to-report vehicle-ahead-on-same-segment [target]
+
+  let my-current current-node
+  let my-target target
+  let my-distance-to-target distance target
+
+  let candidates other mobile-agents with [
+    not arrived? and
+    current-node = my-current and
+    next-node = my-target and
+    distance my-target < my-distance-to-target
+  ]
+
+  if not any? candidates [
+    report nobody
+  ]
+
+  report min-one-of candidates [distance myself]
+end
+
+to-report adjusted-step-distance [desired-step target]
+
+  let front-car vehicle-ahead-on-same-segment target
+
+  if front-car = nobody [
+    report desired-step
+  ]
+
+  let gap distance front-car
+
+  if gap < vehicle-safety-distance [
+    report 0
+  ]
+
+  let front-speed [speed] of front-car
+
+  report min (list desired-step front-speed)
+end
+
+to vehicle-arrive
+  if destination-node != nobody [
+    move-to destination-node
+    set current-node destination-node
+  ]
+
+  set completed-trips completed-trips + 1
+  die
+end
+
+to-report position-blocked? [move-distance]
+
+  let front-car vehicle-ahead-on-same-segment next-node
+
+  if front-car = nobody [
+    report false
+  ]
+
+  report distance front-car < vehicle-safety-distance
+end
+
+to-report on-roundabout?
+  if current-node = nobody or next-node = nobody [
+    report false
+  ]
+
+  let c current-node
+  let n next-node
+
+  report any? edges with [
+    roundabout? and end1 = c and end2 = n
+  ]
+end
+
+to-report next-edge-roundabout? [target]
+  let my-current current-node
+
+  if my-current = nobody or target = nobody [
+    report false
+  ]
+
+  report any? edges with [
+    roundabout? and
+    end1 = my-current and
+    end2 = target
+  ]
+end
+
+to-report roundabout-entry-blocked? [target]
+
+  if waiting-time >= deadlock-release-time [
+    report false
+  ]
+
+  if not next-edge-roundabout? target [
+    report false
+  ]
+
+  if on-roundabout? [
+    report false
+  ]
+
+  report any? other mobile-agents with [
+    not arrived? and
+    on-roundabout? and
+    (
+      next-node = target or
+      distance target < roundabout-priority-radius
+    )
+  ]
+end
+
+to-report has-priority-over-me? [other-car target]
+
+  let my-wait waiting-time
+  let my-distance distance target
+
+  let other-wait [waiting-time] of other-car
+  let other-distance [distance target] of other-car
+
+  if other-wait > my-wait + 0.5 [
+    report true
+  ]
+
+  if abs (other-wait - my-wait) <= 0.5 and other-distance < my-distance [
+    report true
+  ]
+
+  report false
+end
+
+to-report vehicle-from-right-near? [target]
+
+  let my-x xcor
+  let my-y ycor
+  let my-heading heading
+  let right-heading (my-heading + 90) mod 360
+
+  let blockers other mobile-agents with [
+    not arrived? and
+    next-node = target and
+    distance target < right-priority-radius and
+    (abs (subtract-headings
+      (atan (xcor - my-x) (ycor - my-y))
+      right-heading)) < 70
+  ]
+
+  if not any? blockers [
+    report false
+  ]
+
+  let blocked? false
+
+  foreach sort blockers [
+    other-car ->
+    if has-priority-over-me? other-car target [
+      set blocked? true
+    ]
+  ]
+
+  report blocked?
+end
+
+to-report traffic-priority-blocked? [target]
+  
+  if agent-mode = "pedestrian" [
+    report false
+  ]
+
+  if target = nobody [
+    report false
+  ]
+
+  if waiting-time >= deadlock-release-time [
+    report false
+  ]
+
+  if roundabout-entry-blocked? target [
+    report true
+  ]
+
+  if [breed] of target = nodes [
+    if [intersection?] of target and not [roundabout-node?] of target [
+      if vehicle-from-right-near? target [
+        report true
+      ]
+    ]
+  ]
+
+  report false
+end
+
+to-report bounded-random-normal [mean-value sd-value min-value max-value]
+  let value random-normal mean-value sd-value
+
+  if value < min-value [
+    set value min-value
+  ]
+
+  if value > max-value [
+    set value max-value
+  ]
+
+  report value
+end
+
+to move.mobile-agents
+   ask mobile-agents [
+
+    ifelse arrived? [
+      set color green
+      set next-node nobody
+      set path []
+      set speed 0
+    ]
+    [
+
+      set stopped? false
+
+      if destination-node != nobody and current-node = destination-node [
+        vehicle-arrive
+      ]
+
+      if not arrived? [
+
+        let remaining-distance speed
+        let substeps 0
+        let max-substeps 500
+
+        while [remaining-distance > 0 and substeps < max-substeps and not arrived? and not stopped?] [
+
+          set substeps substeps + 1
+
+          if next-node = nobody [
+            ifelse is-list? path and not empty? path [
+              set next-node first path
+              set path but-first path
+            ]
+            [
+              if destination-node = nobody [
+                
+                let my-mode agent-mode
+
+                let possible-links [my-out-edges with [
+                  member? my-mode allowed-modes
+                ]] of current-node
+                
+                if any? possible-links [
+                  let chosen-link one-of possible-links
+                  set next-node [end2] of chosen-link
+                ]
+              ]
+            ]
+          ]
+          if next-node = nobody [
+            set remaining-distance 0
+          ]
+
+          if next-node != nobody [
+
+            let d distance next-node
+
+            ifelse d < 0.0001 [
+
+              ifelse target-node-busy? next-node [
+                set stopped? true
+                set color red
+                set waiting-time waiting-time + seconds-per-tick
+                set remaining-distance 0
+              ]
+              [
+                set previous-node current-node
+                set current-node next-node
+                set next-node nobody
+                set waiting-time 0
+
+                if destination-node != nobody and current-node = destination-node [
+                  vehicle-arrive
+                  set remaining-distance 0
+                ]
+              ]
+
+            ]
+            [
+              face next-node
+
+              let desired-step-distance min (list remaining-distance d movement-step-size)
+              let step-distance adjusted-step-distance desired-step-distance next-node
+              
+              ifelse step-distance = 0 [
+                set stopped? true
+                set color red
+                set waiting-time waiting-time + seconds-per-tick
+                set remaining-distance 0
+              ]
+              [
+                ifelse traffic-priority-blocked? next-node [
+                  set stopped? true
+                  set color red
+                  set waiting-time waiting-time + seconds-per-tick
+                  set remaining-distance 0
+                ]
+                [
+                  ifelse position-blocked? step-distance [
+                    set stopped? true
+                    set color red
+                    set waiting-time waiting-time + seconds-per-tick
+                    set remaining-distance 0
+                  ]
+                  [
+                    fd step-distance
+                    set waiting-time 0
+                    set remaining-distance remaining-distance - step-distance
+                    
+                    if distance next-node < 0.0005 [
+                      set previous-node current-node
+                      set current-node next-node
+                      set next-node nobody
+                      
+                      ifelse destination-node != nobody and current-node = destination-node [
+                        vehicle-arrive
+                        set remaining-distance 0
+                      ]
+                      [
+                        if color != green [
+                          ifelse [breed] of current-node = waypoints [
+                            set color violet
+                          ]
+                          [
+                            set color yellow
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+end
+
+to select.origin
+  if mouse-down? [
+    let p nearest-origin-point mouse-xcor mouse-ycor
+
+    if p != nobody [
+      set origin-point p
+
+      ask p [
+        set color green
+        set size 0.18
+      ]
+
+      user-message "Origin selected."
+    ]
+
+    wait 0.2
+  ]
+end
+
+to-report random-valid-origin [mode]
+  let candidates (turtle-set nodes waypoints) with [
+    any? my-out-edges with [
+      member? mode allowed-modes
+    ]
+  ]
+
+  if not any? candidates [
+    report nobody
+  ]
+
+  report one-of candidates
+end
+
+to-report random-valid-destination [mode]
+  let candidates (turtle-set nodes waypoints) with [
+    any? my-in-edges with [
+      member? mode allowed-modes
+    ]
+  ]
+
+  if not any? candidates [
+    report nobody
+  ]
+
+  report one-of candidates
+end
+
+to generate-random-agent-from-pool [mode]
+
+  if count mobile-agents >= max-active-vehicles [
+    stop
+  ]
+
+  let candidates filter [r -> item 0 r = mode] route-pool
+
+  if empty? candidates [
+    set failed-paths failed-paths + 1
+    stop
+  ]
+
+  let selected-route one-of candidates
+
+  set route-pool remove selected-route route-pool
+
+  let origin item 1 selected-route
+  let destination item 2 selected-route
+  let new-path item 3 selected-route
+
+  create-mobile-agent mode origin destination new-path
+
+  set generated-vehicles generated-vehicles + 1
+end
+
+to precompute-all-random-routes
+  set route-pool []
+
+  precompute-random-routes "car" route-pool-target-size
+  precompute-random-routes "bus" route-pool-target-size
+  precompute-random-routes "bike" route-pool-target-size
+  precompute-random-routes "pedestrian" route-pool-target-size
+end
+
+to debug-route-pool
+  show (word "car routes in pool: " length filter [r -> item 0 r = "car"] route-pool)
+  show (word "bus routes in pool: " length filter [r -> item 0 r = "bus"] route-pool)
+  show (word "bike routes in pool: " length filter [r -> item 0 r = "bike"] route-pool)
+  show (word "pedestrian routes in pool: " length filter [r -> item 0 r = "pedestrian"] route-pool)
+end
+
+to precompute-random-routes [mode number-of-routes]
+
+  let attempts 0
+  let max-attempts number-of-routes * 20
+  let created 0
+
+  while [created < number-of-routes and attempts < max-attempts] [
+
+    set attempts attempts + 1
+
+    let origin random-valid-origin mode
+    let destination random-valid-destination mode
+
+    if origin != nobody and destination != nobody and origin != destination [
+
+      let new-path shortest-path origin destination mode
+
+      if not empty? new-path [
+        set route-pool lput (list mode origin destination new-path) route-pool
+        set created created + 1
+      ]
+    ]
+  ]
+
+  show (word "Precomputed " mode " routes: " created)
+end
+
+to generate-traffic-if-needed
+  if sim-time-seconds - last-vehicle-generation-time >= vehicle-generation-interval-seconds [
+
+    let mode traffic-generation-mode
+
+    if mode = "mixed" [
+      set mode one-of ["car" "bus" "bike" "pedestrian"]
+    ]
+
+    generate-random-agent-from-pool mode
+    set last-vehicle-generation-time sim-time-seconds
+  ]
+end
+
+to-report nearest-origin-point [x y]
+  let graph-points (turtle-set nodes waypoints) with [
+    any? my-out-edges with [
+      member? "car" allowed-modes
+    ]
+  ]
+
+  if not any? graph-points [
+    report nobody
+  ]
+
+  report min-one-of graph-points [distancexy x y]
+end
+
+to select.destination
+  if mouse-down? [
+    let p nearest-destination-point mouse-xcor mouse-ycor
+
+    if p != nobody [
+      set destination-point p
+
+      ask p [
+        set color magenta
+        set size 0.18
+      ]
+
+      user-message "Destination selected."
+    ]
+
+    wait 0.2
+  ]
+end
+
+to-report nearest-destination-point [x y]
+  let graph-points (turtle-set nodes waypoints) with [
+    any? my-in-edges with [
+      member? "car" allowed-modes
+    ]
+  ]
+
+  if not any? graph-points [
+    report nobody
+  ]
+
+  report min-one-of graph-points [distancexy x y]
+end
+
+to-report shortest-path [source target mode]
+
+  let graph-points (turtle-set nodes waypoints)
+
+  ask graph-points [
+    set dist 999999999
+    set previous nobody
+    set visited? false
+  ]
+
+  ask source [
+    set dist 0
+  ]
+  let iterations 0
+  let max-iterations 100000
+
+  while [any? graph-points with [not visited?] and iterations < max-iterations] [
+
+    set iterations iterations + 1
+
+    let current min-one-of graph-points with [not visited?] [dist]
+
+    if current = nobody [
+      report []
+    ]
+
+    if [dist] of current = 999999999 [
+      report []
+    ]
+
+    if current = target [
+      report build-path source target
+    ]
+
+    ask current [
+      set visited? true
+    ]
+
+    let outgoing-edges [my-out-edges with [
+      member? mode allowed-modes
+    ]] of current
+
+    ask outgoing-edges [
+      let neighbor end2
+      let alt ([dist] of current) + road-length
+
+      if alt < [dist] of neighbor [
+        ask neighbor [
+          set dist alt
+          set previous current
+        ]
+      ]
+    ]
+  ]
+
+  report []
+end
+
+to-report build-path [source target]
+
+  let result []
+  let current target
+
+  while [current != nobody and current != source] [
+    set result fput current result
+    set current [previous] of current
+  ]
+
+  if current = source [
+    report result
+  ]
+
+  report []
+end
+
+to create.vehicle.from.selection
+  if origin-point = nobody or destination-point = nobody [
+    user-message "Select an origin and a destination."
+    stop
+  ]
+
+  set selected-path shortest-path origin-point destination-point "car"
+
+  if empty? selected-path [
+    user-message "It hasn't found a path between the origin and the destination."
+    stop
+  ]
+
+  create-vehicles 1 [
+    set color yellow
+    set size 0.5
+    set shape "car"
+    set agent-mode "car"
+
+    set current-node origin-point
+    move-to current-node
+
+    set destination-node destination-point
+    set path selected-path
+
+    set previous-node nobody
+    set next-node nobody
+    set speed-factor bounded-random-normal 1 0.15 0.6 1.4
+    set speed kmh-to-netlogo-speed (vehicle-speed-kmh * speed-factor)
+    set stopped? false
+    set arrived? false
+    set waiting-time 0
+  ]
+
+  highlight-selected-path
+
+end
+
+to highlight-selected-path
+  if origin-point = nobody or empty? selected-path [
+    stop
+  ]
+
+  let full-path fput origin-point selected-path
+  let i 0
+
+  while [i < length full-path - 1] [
+    let a item i full-path
+    let b item (i + 1) full-path
+
+    let edg one-of edges with [end1 = a and end2 = b]
+
+    if edg != nobody [
+      ask edg [
+        set color green
+        set thickness 0.03
+      ]
+    ]
+
+    set i i + 1
+  ]
+end
+
+to-report nearest-graph-point [x y]
+  let graph-points (turtle-set nodes waypoints)
+
+  if not any? graph-points [
+    report nobody
+  ]
+
+  report min-one-of graph-points [distancexy x y]
+end
+
+to-report kmh-to-mps [kmh]
+  report kmh / 3.6
+end
+
+to-report kmh-to-netlogo-speed [kmh]
+  if meters-per-netlogo-unit <= 0 [
+    user-message "meters-per-netlogo-unit must be greater than 0. Execute setup."
+    report 0
+  ]
+
+  report ((kmh-to-mps kmh) / meters-per-netlogo-unit) * seconds-per-tick
+end
+
+to update.mobile-agent.speed
+  ask mobile-agents [
+    set speed kmh-to-netlogo-speed (speed-kmh-from-mode agent-mode * speed-factor)
+  ]
+end
+
+to-report two-digits [n]
+  if n < 10 [
+    report word "0" n
+  ]
+
+  report word n ""
+end
+
+to-report sim-clock
+  let total floor sim-time-seconds
+  let h floor (total / 3600)
+  let m floor ((total mod 3600) / 60)
+  let s total mod 60
+
+  report (word two-digits h ":" two-digits m ":" two-digits s)
+end
+
+to export.world
+  export-world "data/saved_graph_world.csv"
+end
+
+to export-results
+  file-close-all
+  file-open "outputs/simulation_results.csv"
+  file-print "sim_time_seconds,number_of_vehicles,vehicle_speed_kmh,total_vehicles"
+  file-print (word sim-time-seconds "," number-of-vehicles "," vehicle-speed-kmh "," count vehicles)
+  file-close
+end
+
+to go-manual
+  update.mobile-agent.speed
+  move.mobile-agents
+
+  set sim-time-seconds sim-time-seconds + seconds-per-tick
+  tick
+end
+
+to go
+  if sim-time-seconds >= simulation-duration-seconds [
+    user-message "Simulation finished."
+    stop
+  ]
+
+  generate-traffic-if-needed
+  update.mobile-agent.speed
+  move.mobile-agents
+
+  set sim-time-seconds sim-time-seconds + seconds-per-tick
+  tick
+end
+
+to initialize-simulation
+  setup
+  precompute-all-random-routes
+
+  let mode traffic-generation-mode
+
+  if mode = "mixed" [
+    set mode one-of ["car" "bus" "bike" "pedestrian"]
+  ]
+
+  generate-random-agent-from-pool mode
+  debug-route-pool
+  set last-vehicle-generation-time sim-time-seconds
+end
+
+to demo-run
+  setup
+  create.vehicles
+
+  repeat 100 [
+    go
+  ]
+
+  export-results
+
+  user-message "Demo finished. Results exported to outputs/simulation_results.csv"
+end]]></code>
+  <widgets>
+    <view x="330" wrappingAllowedX="true" y="0" frameRate="30.0" minPycor="-16" height="985" showTickCounter="true" patchSize="38.67" fontSize="10" wrappingAllowedY="true" width="985" tickCounterLabel="ticks" maxPycor="16" updateMode="1" maxPxcor="16" minPxcor="-16"></view>
+    <button x="15" y="25" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="66" display="setup">setup</button>
+    <button x="105" y="25" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="55" display="go">go</button>
+    <button x="15" y="80" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="100">select.origin</button>
+    <button x="135" y="80" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="130">select.destination</button>
+    <button x="15" y="135" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="121">initialize-simulation</button>
+    <button x="155" y="135" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="165">create.vehicle.from.selection</button>
+    <button x="120" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="90">export-results
+</button>
+    <button x="15" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="95" display="export.world">export.world</button>
+    <slider x="15" step="1" y="315" max="50" width="250" display="vehicle-speed-kmh" height="50" min="0" direction="Horizontal" default="25.0" variable="vehicle-speed-kmh"></slider>
+    <slider x="15" step="1" y="375" max="25" width="250" display="number-of-vehicles" height="50" min="1" direction="Horizontal" default="10.0" variable="number-of-vehicles"></slider>
+    <button x="15" y="255" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="70">demo-run
+</button>
+    <slider x="15" step="1" y="435" max="2000" width="250" display="simulation-duration-minutes" height="50" min="0" direction="Horizontal" default="10.0" variable="simulation-duration-minutes" units="min"></slider>
+    <slider x="15" step="1" y="495" max="100" width="250" display="vehicle-generation-interval-seconds" height="50" min="0" direction="Horizontal" default="5.0" variable="vehicle-generation-interval-seconds" units="seconds"></slider>
+    <slider x="15" step="1" y="555" max="100" width="250" display="max-active-vehicles" height="50" min="0" direction="Horizontal" default="50.0" variable="max-active-vehicles"></slider>
+    <monitor x="15" precision="17" y="610" height="60" fontSize="11" width="100">sim-clock</monitor>
+    <monitor x="120" precision="17" y="610" height="60" fontSize="11" width="100">generated-vehicles</monitor>
+    <monitor x="225" precision="17" y="610" height="60" fontSize="11" width="100">completed-trips</monitor>
+    <monitor x="15" precision="17" y="675" height="60" fontSize="11" width="100">count vehicles</monitor>
+    <monitor x="120" precision="17" y="675" height="60" fontSize="11" width="100">failed-paths</monitor>
+    <button x="180" y="25" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="95">go-manual</button>
+    <button x="220" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="96" display="create.vehicles">create.vehicles</button>
+    <chooser x="100" y="245" height="60" variable="traffic-generation-mode" current="0" width="205" display="traffic-generation-mode">
+      <choice type="string" value="car"></choice>
+      <choice type="string" value="bus"></choice>
+      <choice type="string" value="bike"></choice>
+      <choice type="string" value="pedestrian"></choice>
+      <choice type="string" value="mixed"></choice>
+    </chooser>
+  </widgets>
+  <info>## WHAT IS IT?
+
+(a general understanding of what the model is trying to show or explain)
+
+## HOW IT WORKS
+
+(what rules the agents use to create the overall behavior of the model)
+
+## HOW TO USE IT
+
+(how to use the model, including a description of each of the items in the Interface tab)
+
+## THINGS TO NOTICE
+
+(suggested things for the user to notice while running the model)
+
+## THINGS TO TRY
+
+(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+
+## EXTENDING THE MODEL
+
+(suggested things to add or change in the Code tab to make the model more complicated, detailed, accurate, etc.)
+
+## NETLOGO FEATURES
+
+(interesting or unusual features of NetLogo that the model uses, particularly in the Code tab; or where workarounds were needed for missing features)
+
+## RELATED MODELS
+
+(models in the NetLogo Models Library and elsewhere which are of related interest)
+
+## CREDITS AND REFERENCES
+
+(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+</info>
+  <turtleShapes>
+    <shape name="default" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="5"></point>
+        <point x="40" y="250"></point>
+        <point x="150" y="205"></point>
+        <point x="260" y="250"></point>
+      </polygon>
+    </shape>
+    <shape name="airplane" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="0"></point>
+        <point x="135" y="15"></point>
+        <point x="120" y="60"></point>
+        <point x="120" y="105"></point>
+        <point x="15" y="165"></point>
+        <point x="15" y="195"></point>
+        <point x="120" y="180"></point>
+        <point x="135" y="240"></point>
+        <point x="105" y="270"></point>
+        <point x="120" y="285"></point>
+        <point x="150" y="270"></point>
+        <point x="180" y="285"></point>
+        <point x="210" y="270"></point>
+        <point x="165" y="240"></point>
+        <point x="180" y="180"></point>
+        <point x="285" y="195"></point>
+        <point x="285" y="165"></point>
+        <point x="180" y="105"></point>
+        <point x="180" y="60"></point>
+        <point x="165" y="15"></point>
+      </polygon>
+    </shape>
+    <shape name="arrow" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="0"></point>
+        <point x="0" y="150"></point>
+        <point x="105" y="150"></point>
+        <point x="105" y="293"></point>
+        <point x="195" y="293"></point>
+        <point x="195" y="150"></point>
+        <point x="300" y="150"></point>
+      </polygon>
+    </shape>
+    <shape name="box" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="285"></point>
+        <point x="285" y="225"></point>
+        <point x="285" y="75"></point>
+        <point x="150" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="135"></point>
+        <point x="15" y="75"></point>
+        <point x="150" y="15"></point>
+        <point x="285" y="75"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="15" y="75"></point>
+        <point x="15" y="225"></point>
+        <point x="150" y="285"></point>
+        <point x="150" y="135"></point>
+      </polygon>
+      <line endX="150" startY="285" marked="false" color="255" endY="135" startX="150"></line>
+      <line endX="15" startY="135" marked="false" color="255" endY="75" startX="150"></line>
+      <line endX="285" startY="135" marked="false" color="255" endY="75" startX="150"></line>
+    </shape>
+    <shape name="bug" rotatable="true" editableColorIndex="0">
+      <circle x="96" y="182" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="110" y="127" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <circle x="110" y="75" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <line endX="80" startY="100" marked="true" color="-1920102913" endY="30" startX="150"></line>
+      <line endX="220" startY="100" marked="true" color="-1920102913" endY="30" startX="150"></line>
+    </shape>
+    <shape name="bus" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="15" y="206"></point>
+        <point x="15" y="150"></point>
+        <point x="15" y="120"></point>
+        <point x="30" y="105"></point>
+        <point x="270" y="105"></point>
+        <point x="285" y="120"></point>
+        <point x="285" y="135"></point>
+        <point x="285" y="206"></point>
+        <point x="270" y="210"></point>
+        <point x="30" y="210"></point>
+      </polygon>
+      <rectangle endX="231" startY="126" marked="false" color="255" endY="159" startX="36" filled="true"></rectangle>
+      <line endX="60" startY="135" marked="false" color="-1920102913" endY="165" startX="60"></line>
+      <line endX="60" startY="120" marked="false" color="-1920102913" endY="165" startX="60"></line>
+      <line endX="90" startY="120" marked="false" color="-1920102913" endY="165" startX="90"></line>
+      <line endX="120" startY="120" marked="false" color="-1920102913" endY="165" startX="120"></line>
+      <line endX="150" startY="120" marked="false" color="-1920102913" endY="165" startX="150"></line>
+      <line endX="180" startY="120" marked="false" color="-1920102913" endY="165" startX="180"></line>
+      <line endX="210" startY="120" marked="false" color="-1920102913" endY="165" startX="210"></line>
+      <line endX="240" startY="135" marked="false" color="-1920102913" endY="165" startX="240"></line>
+      <rectangle endX="285" startY="174" marked="false" color="255" endY="182" startX="15" filled="true"></rectangle>
+      <circle x="48" y="187" marked="false" color="255" diameter="42" filled="true"></circle>
+      <rectangle endX="276" startY="127" marked="false" color="255" endY="205" startX="240" filled="true"></rectangle>
+      <circle x="195" y="187" marked="false" color="255" diameter="42" filled="true"></circle>
+      <line endX="257" startY="120" marked="false" color="-1920102913" endY="207" startX="257"></line>
+    </shape>
+    <shape name="butterfly" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="165"></point>
+        <point x="209" y="199"></point>
+        <point x="225" y="225"></point>
+        <point x="225" y="255"></point>
+        <point x="195" y="270"></point>
+        <point x="165" y="255"></point>
+        <point x="150" y="240"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="165"></point>
+        <point x="89" y="198"></point>
+        <point x="75" y="225"></point>
+        <point x="75" y="255"></point>
+        <point x="105" y="270"></point>
+        <point x="135" y="255"></point>
+        <point x="150" y="240"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="139" y="148"></point>
+        <point x="100" y="105"></point>
+        <point x="55" y="90"></point>
+        <point x="25" y="90"></point>
+        <point x="10" y="105"></point>
+        <point x="10" y="135"></point>
+        <point x="25" y="180"></point>
+        <point x="40" y="195"></point>
+        <point x="85" y="194"></point>
+        <point x="139" y="163"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="162" y="150"></point>
+        <point x="200" y="105"></point>
+        <point x="245" y="90"></point>
+        <point x="275" y="90"></point>
+        <point x="290" y="105"></point>
+        <point x="290" y="135"></point>
+        <point x="275" y="180"></point>
+        <point x="260" y="195"></point>
+        <point x="215" y="195"></point>
+        <point x="162" y="165"></point>
+      </polygon>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="255"></point>
+        <point x="135" y="225"></point>
+        <point x="120" y="150"></point>
+        <point x="135" y="120"></point>
+        <point x="150" y="105"></point>
+        <point x="165" y="120"></point>
+        <point x="180" y="150"></point>
+        <point x="165" y="225"></point>
+      </polygon>
+      <circle x="135" y="90" marked="false" color="255" diameter="30" filled="true"></circle>
+      <line endX="195" startY="105" marked="false" color="255" endY="60" startX="150"></line>
+      <line endX="105" startY="105" marked="false" color="255" endY="60" startX="150"></line>
+    </shape>
+    <shape name="car" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="300" y="180"></point>
+        <point x="279" y="164"></point>
+        <point x="261" y="144"></point>
+        <point x="240" y="135"></point>
+        <point x="226" y="132"></point>
+        <point x="213" y="106"></point>
+        <point x="203" y="84"></point>
+        <point x="185" y="63"></point>
+        <point x="159" y="50"></point>
+        <point x="135" y="50"></point>
+        <point x="75" y="60"></point>
+        <point x="0" y="150"></point>
+        <point x="0" y="165"></point>
+        <point x="0" y="225"></point>
+        <point x="300" y="225"></point>
+        <point x="300" y="180"></point>
+      </polygon>
+      <circle x="180" y="180" marked="false" color="255" diameter="90" filled="true"></circle>
+      <circle x="30" y="180" marked="false" color="255" diameter="90" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="162" y="80"></point>
+        <point x="132" y="78"></point>
+        <point x="134" y="135"></point>
+        <point x="209" y="135"></point>
+        <point x="194" y="105"></point>
+        <point x="189" y="96"></point>
+        <point x="180" y="89"></point>
+      </polygon>
+      <circle x="47" y="195" marked="true" color="-1920102913" diameter="58" filled="true"></circle>
+      <circle x="195" y="195" marked="true" color="-1920102913" diameter="58" filled="true"></circle>
+    </shape>
+    <shape name="circle" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+    </shape>
+    <shape name="circle 2" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+    </shape>
+    <shape name="cow" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="200" y="193"></point>
+        <point x="197" y="249"></point>
+        <point x="179" y="249"></point>
+        <point x="177" y="196"></point>
+        <point x="166" y="187"></point>
+        <point x="140" y="189"></point>
+        <point x="93" y="191"></point>
+        <point x="78" y="179"></point>
+        <point x="72" y="211"></point>
+        <point x="49" y="209"></point>
+        <point x="48" y="181"></point>
+        <point x="37" y="149"></point>
+        <point x="25" y="120"></point>
+        <point x="25" y="89"></point>
+        <point x="45" y="72"></point>
+        <point x="103" y="84"></point>
+        <point x="179" y="75"></point>
+        <point x="198" y="76"></point>
+        <point x="252" y="64"></point>
+        <point x="272" y="81"></point>
+        <point x="293" y="103"></point>
+        <point x="285" y="121"></point>
+        <point x="255" y="121"></point>
+        <point x="242" y="118"></point>
+        <point x="224" y="167"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="73" y="210"></point>
+        <point x="86" y="251"></point>
+        <point x="62" y="249"></point>
+        <point x="48" y="208"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="25" y="114"></point>
+        <point x="16" y="195"></point>
+        <point x="9" y="204"></point>
+        <point x="23" y="213"></point>
+        <point x="25" y="200"></point>
+        <point x="39" y="123"></point>
+      </polygon>
+    </shape>
+    <shape name="cylinder" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+    </shape>
+    <shape name="dot" rotatable="false" editableColorIndex="0">
+      <circle x="90" y="90" marked="true" color="-1920102913" diameter="120" filled="true"></circle>
+    </shape>
+    <shape name="face happy" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="8" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="255"></point>
+        <point x="90" y="239"></point>
+        <point x="62" y="213"></point>
+        <point x="47" y="191"></point>
+        <point x="67" y="179"></point>
+        <point x="90" y="203"></point>
+        <point x="109" y="218"></point>
+        <point x="150" y="225"></point>
+        <point x="192" y="218"></point>
+        <point x="210" y="203"></point>
+        <point x="227" y="181"></point>
+        <point x="251" y="194"></point>
+        <point x="236" y="217"></point>
+        <point x="212" y="240"></point>
+      </polygon>
+    </shape>
+    <shape name="face neutral" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="7" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <rectangle endX="240" startY="195" marked="false" color="255" endY="225" startX="60" filled="true"></rectangle>
+    </shape>
+    <shape name="face sad" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="8" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="168"></point>
+        <point x="90" y="184"></point>
+        <point x="62" y="210"></point>
+        <point x="47" y="232"></point>
+        <point x="67" y="244"></point>
+        <point x="90" y="220"></point>
+        <point x="109" y="205"></point>
+        <point x="150" y="198"></point>
+        <point x="192" y="205"></point>
+        <point x="210" y="220"></point>
+        <point x="227" y="242"></point>
+        <point x="251" y="229"></point>
+        <point x="236" y="206"></point>
+        <point x="212" y="183"></point>
+      </polygon>
+    </shape>
+    <shape name="fish" rotatable="false" editableColorIndex="0">
+      <polygon color="-1" filled="true" marked="false">
+        <point x="44" y="131"></point>
+        <point x="21" y="87"></point>
+        <point x="15" y="86"></point>
+        <point x="0" y="120"></point>
+        <point x="15" y="150"></point>
+        <point x="0" y="180"></point>
+        <point x="13" y="214"></point>
+        <point x="20" y="212"></point>
+        <point x="45" y="166"></point>
+      </polygon>
+      <polygon color="-1" filled="true" marked="false">
+        <point x="135" y="195"></point>
+        <point x="119" y="235"></point>
+        <point x="95" y="218"></point>
+        <point x="76" y="210"></point>
+        <point x="46" y="204"></point>
+        <point x="60" y="165"></point>
+      </polygon>
+      <polygon color="-1" filled="true" marked="false">
+        <point x="75" y="45"></point>
+        <point x="83" y="77"></point>
+        <point x="71" y="103"></point>
+        <point x="86" y="114"></point>
+        <point x="166" y="78"></point>
+        <point x="135" y="60"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="30" y="136"></point>
+        <point x="151" y="77"></point>
+        <point x="226" y="81"></point>
+        <point x="280" y="119"></point>
+        <point x="292" y="146"></point>
+        <point x="292" y="160"></point>
+        <point x="287" y="170"></point>
+        <point x="270" y="195"></point>
+        <point x="195" y="210"></point>
+        <point x="151" y="212"></point>
+        <point x="30" y="166"></point>
+      </polygon>
+      <circle x="215" y="106" marked="false" color="255" diameter="30" filled="true"></circle>
+    </shape>
+    <shape name="flag" rotatable="false" editableColorIndex="0">
+      <rectangle endX="75" startY="15" marked="true" color="-1920102913" endY="300" startX="60" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="90" y="150"></point>
+        <point x="270" y="90"></point>
+        <point x="90" y="30"></point>
+      </polygon>
+      <line endX="90" startY="135" marked="true" color="-1920102913" endY="135" startX="75"></line>
+      <line endX="90" startY="45" marked="true" color="-1920102913" endY="45" startX="75"></line>
+    </shape>
+    <shape name="flower" rotatable="false" editableColorIndex="0">
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="135" y="120"></point>
+        <point x="165" y="165"></point>
+        <point x="180" y="210"></point>
+        <point x="180" y="240"></point>
+        <point x="150" y="300"></point>
+        <point x="165" y="300"></point>
+        <point x="195" y="240"></point>
+        <point x="195" y="195"></point>
+        <point x="165" y="135"></point>
+      </polygon>
+      <circle x="85" y="132" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="130" y="147" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="192" y="85" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="85" y="40" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="177" y="40" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="177" y="132" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="70" y="85" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="130" y="25" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="96" y="51" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="113" y="68" marked="false" color="255" diameter="74" filled="true"></circle>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="189" y="233"></point>
+        <point x="219" y="188"></point>
+        <point x="249" y="173"></point>
+        <point x="279" y="188"></point>
+        <point x="234" y="218"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="180" y="255"></point>
+        <point x="150" y="210"></point>
+        <point x="105" y="210"></point>
+        <point x="75" y="240"></point>
+        <point x="135" y="240"></point>
+      </polygon>
+    </shape>
+    <shape name="house" rotatable="false" editableColorIndex="0">
+      <rectangle endX="255" startY="120" marked="true" color="-1920102913" endY="285" startX="45" filled="true"></rectangle>
+      <rectangle endX="180" startY="210" marked="false" color="255" endY="285" startX="120" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="15" y="120"></point>
+        <point x="150" y="15"></point>
+        <point x="285" y="120"></point>
+      </polygon>
+      <line endX="270" startY="120" marked="false" color="255" endY="120" startX="30"></line>
+    </shape>
+    <shape name="leaf" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="210"></point>
+        <point x="135" y="195"></point>
+        <point x="120" y="210"></point>
+        <point x="60" y="210"></point>
+        <point x="30" y="195"></point>
+        <point x="60" y="180"></point>
+        <point x="60" y="165"></point>
+        <point x="15" y="135"></point>
+        <point x="30" y="120"></point>
+        <point x="15" y="105"></point>
+        <point x="40" y="104"></point>
+        <point x="45" y="90"></point>
+        <point x="60" y="90"></point>
+        <point x="90" y="105"></point>
+        <point x="105" y="120"></point>
+        <point x="120" y="120"></point>
+        <point x="105" y="60"></point>
+        <point x="120" y="60"></point>
+        <point x="135" y="30"></point>
+        <point x="150" y="15"></point>
+        <point x="165" y="30"></point>
+        <point x="180" y="60"></point>
+        <point x="195" y="60"></point>
+        <point x="180" y="120"></point>
+        <point x="195" y="120"></point>
+        <point x="210" y="105"></point>
+        <point x="240" y="90"></point>
+        <point x="255" y="90"></point>
+        <point x="263" y="104"></point>
+        <point x="285" y="105"></point>
+        <point x="270" y="120"></point>
+        <point x="285" y="135"></point>
+        <point x="240" y="165"></point>
+        <point x="240" y="180"></point>
+        <point x="270" y="195"></point>
+        <point x="240" y="210"></point>
+        <point x="180" y="210"></point>
+        <point x="165" y="195"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="195"></point>
+        <point x="135" y="240"></point>
+        <point x="120" y="255"></point>
+        <point x="105" y="255"></point>
+        <point x="105" y="285"></point>
+        <point x="135" y="285"></point>
+        <point x="165" y="240"></point>
+        <point x="165" y="195"></point>
+      </polygon>
+    </shape>
+    <shape name="line" rotatable="true" editableColorIndex="0">
+      <line endX="150" startY="0" marked="true" color="-1920102913" endY="300" startX="150"></line>
+    </shape>
+    <shape name="line half" rotatable="true" editableColorIndex="0">
+      <line endX="150" startY="0" marked="true" color="-1920102913" endY="150" startX="150"></line>
+    </shape>
+    <shape name="pentagon" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="15"></point>
+        <point x="15" y="120"></point>
+        <point x="60" y="285"></point>
+        <point x="240" y="285"></point>
+        <point x="285" y="120"></point>
+      </polygon>
+    </shape>
+    <shape name="person" rotatable="false" editableColorIndex="0">
+      <circle x="110" y="5" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="105" y="90"></point>
+        <point x="120" y="195"></point>
+        <point x="90" y="285"></point>
+        <point x="105" y="300"></point>
+        <point x="135" y="300"></point>
+        <point x="150" y="225"></point>
+        <point x="165" y="300"></point>
+        <point x="195" y="300"></point>
+        <point x="210" y="285"></point>
+        <point x="180" y="195"></point>
+        <point x="195" y="90"></point>
+      </polygon>
+      <rectangle endX="172" startY="79" marked="true" color="-1920102913" endY="94" startX="127" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="195" y="90"></point>
+        <point x="240" y="150"></point>
+        <point x="225" y="180"></point>
+        <point x="165" y="105"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="105" y="90"></point>
+        <point x="60" y="150"></point>
+        <point x="75" y="180"></point>
+        <point x="135" y="105"></point>
+      </polygon>
+    </shape>
+    <shape name="plant" rotatable="false" editableColorIndex="0">
+      <rectangle endX="165" startY="90" marked="true" color="-1920102913" endY="300" startX="135" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="255"></point>
+        <point x="90" y="210"></point>
+        <point x="45" y="195"></point>
+        <point x="75" y="255"></point>
+        <point x="135" y="285"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="255"></point>
+        <point x="210" y="210"></point>
+        <point x="255" y="195"></point>
+        <point x="225" y="255"></point>
+        <point x="165" y="285"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="180"></point>
+        <point x="90" y="135"></point>
+        <point x="45" y="120"></point>
+        <point x="75" y="180"></point>
+        <point x="135" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="180"></point>
+        <point x="165" y="210"></point>
+        <point x="225" y="180"></point>
+        <point x="255" y="120"></point>
+        <point x="210" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="105"></point>
+        <point x="90" y="60"></point>
+        <point x="45" y="45"></point>
+        <point x="75" y="105"></point>
+        <point x="135" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="105"></point>
+        <point x="165" y="135"></point>
+        <point x="225" y="105"></point>
+        <point x="255" y="45"></point>
+        <point x="210" y="60"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="90"></point>
+        <point x="120" y="45"></point>
+        <point x="150" y="15"></point>
+        <point x="180" y="45"></point>
+        <point x="165" y="90"></point>
+      </polygon>
+    </shape>
+    <shape name="sheep" rotatable="false" editableColorIndex="15">
+      <circle x="203" y="65" marked="true" color="-1" diameter="88" filled="true"></circle>
+      <circle x="70" y="65" marked="true" color="-1" diameter="162" filled="true"></circle>
+      <circle x="150" y="105" marked="true" color="-1" diameter="120" filled="true"></circle>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="218" y="120"></point>
+        <point x="240" y="165"></point>
+        <point x="255" y="165"></point>
+        <point x="278" y="120"></point>
+      </polygon>
+      <circle x="214" y="72" marked="false" color="-1920102913" diameter="67" filled="true"></circle>
+      <rectangle endX="179" startY="223" marked="true" color="-1" endY="298" startX="164" filled="true"></rectangle>
+      <polygon color="-1" filled="true" marked="true">
+        <point x="45" y="285"></point>
+        <point x="30" y="285"></point>
+        <point x="30" y="240"></point>
+        <point x="15" y="195"></point>
+        <point x="45" y="210"></point>
+      </polygon>
+      <circle x="3" y="83" marked="true" color="-1" diameter="150" filled="true"></circle>
+      <rectangle endX="80" startY="221" marked="true" color="-1" endY="296" startX="65" filled="true"></rectangle>
+      <polygon color="-1" filled="true" marked="true">
+        <point x="195" y="285"></point>
+        <point x="210" y="285"></point>
+        <point x="210" y="240"></point>
+        <point x="240" y="210"></point>
+        <point x="195" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="276" y="85"></point>
+        <point x="285" y="105"></point>
+        <point x="302" y="99"></point>
+        <point x="294" y="83"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="219" y="85"></point>
+        <point x="210" y="105"></point>
+        <point x="193" y="99"></point>
+        <point x="201" y="83"></point>
+      </polygon>
+    </shape>
+    <shape name="square" rotatable="false" editableColorIndex="0">
+      <rectangle endX="270" startY="30" marked="true" color="-1920102913" endY="270" startX="30" filled="true"></rectangle>
+    </shape>
+    <shape name="square 2" rotatable="false" editableColorIndex="0">
+      <rectangle endX="270" startY="30" marked="true" color="-1920102913" endY="270" startX="30" filled="true"></rectangle>
+      <rectangle endX="240" startY="60" marked="false" color="255" endY="240" startX="60" filled="true"></rectangle>
+    </shape>
+    <shape name="star" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="151" y="1"></point>
+        <point x="185" y="108"></point>
+        <point x="298" y="108"></point>
+        <point x="207" y="175"></point>
+        <point x="242" y="282"></point>
+        <point x="151" y="216"></point>
+        <point x="59" y="282"></point>
+        <point x="94" y="175"></point>
+        <point x="3" y="108"></point>
+        <point x="116" y="108"></point>
+      </polygon>
+    </shape>
+    <shape name="target" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+      <circle x="60" y="60" marked="true" color="-1920102913" diameter="180" filled="true"></circle>
+      <circle x="90" y="90" marked="false" color="255" diameter="120" filled="true"></circle>
+      <circle x="120" y="120" marked="true" color="-1920102913" diameter="60" filled="true"></circle>
+    </shape>
+    <shape name="tree" rotatable="false" editableColorIndex="0">
+      <circle x="118" y="3" marked="true" color="-1920102913" diameter="94" filled="true"></circle>
+      <rectangle endX="180" startY="195" marked="false" color="-1653716737" endY="300" startX="120" filled="true"></rectangle>
+      <circle x="65" y="21" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="116" y="41" marked="true" color="-1920102913" diameter="127" filled="true"></circle>
+      <circle x="45" y="90" marked="true" color="-1920102913" diameter="120" filled="true"></circle>
+      <circle x="104" y="74" marked="true" color="-1920102913" diameter="152" filled="true"></circle>
+    </shape>
+    <shape name="triangle" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="30"></point>
+        <point x="15" y="255"></point>
+        <point x="285" y="255"></point>
+      </polygon>
+    </shape>
+    <shape name="triangle 2" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="30"></point>
+        <point x="15" y="255"></point>
+        <point x="285" y="255"></point>
+      </polygon>
+      <polygon color="255" filled="true" marked="false">
+        <point x="151" y="99"></point>
+        <point x="225" y="223"></point>
+        <point x="75" y="224"></point>
+      </polygon>
+    </shape>
+    <shape name="truck" rotatable="false" editableColorIndex="0">
+      <rectangle endX="195" startY="45" marked="true" color="-1920102913" endY="187" startX="4" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="296" y="193"></point>
+        <point x="296" y="150"></point>
+        <point x="259" y="134"></point>
+        <point x="244" y="104"></point>
+        <point x="208" y="104"></point>
+        <point x="207" y="194"></point>
+      </polygon>
+      <rectangle endX="195" startY="60" marked="false" color="-1" endY="105" startX="195" filled="true"></rectangle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="238" y="112"></point>
+        <point x="252" y="141"></point>
+        <point x="219" y="141"></point>
+        <point x="218" y="112"></point>
+      </polygon>
+      <circle x="234" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <rectangle endX="214" startY="185" marked="true" color="-1920102913" endY="194" startX="181" filled="true"></rectangle>
+      <circle x="144" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <circle x="24" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <circle x="24" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+      <circle x="144" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+      <circle x="234" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+    </shape>
+    <shape name="turtle" rotatable="true" editableColorIndex="0">
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="215" y="204"></point>
+        <point x="240" y="233"></point>
+        <point x="246" y="254"></point>
+        <point x="228" y="266"></point>
+        <point x="215" y="252"></point>
+        <point x="193" y="210"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="195" y="90"></point>
+        <point x="225" y="75"></point>
+        <point x="245" y="75"></point>
+        <point x="260" y="89"></point>
+        <point x="269" y="108"></point>
+        <point x="261" y="124"></point>
+        <point x="240" y="105"></point>
+        <point x="225" y="105"></point>
+        <point x="210" y="105"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="105" y="90"></point>
+        <point x="75" y="75"></point>
+        <point x="55" y="75"></point>
+        <point x="40" y="89"></point>
+        <point x="31" y="108"></point>
+        <point x="39" y="124"></point>
+        <point x="60" y="105"></point>
+        <point x="75" y="105"></point>
+        <point x="90" y="105"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="132" y="85"></point>
+        <point x="134" y="64"></point>
+        <point x="107" y="51"></point>
+        <point x="108" y="17"></point>
+        <point x="150" y="2"></point>
+        <point x="192" y="18"></point>
+        <point x="192" y="52"></point>
+        <point x="169" y="65"></point>
+        <point x="172" y="87"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="85" y="204"></point>
+        <point x="60" y="233"></point>
+        <point x="54" y="254"></point>
+        <point x="72" y="266"></point>
+        <point x="85" y="252"></point>
+        <point x="107" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="119" y="75"></point>
+        <point x="179" y="75"></point>
+        <point x="209" y="101"></point>
+        <point x="224" y="135"></point>
+        <point x="220" y="225"></point>
+        <point x="175" y="261"></point>
+        <point x="128" y="261"></point>
+        <point x="81" y="224"></point>
+        <point x="74" y="135"></point>
+        <point x="88" y="99"></point>
+      </polygon>
+    </shape>
+    <shape name="wheel" rotatable="false" editableColorIndex="0">
+      <circle x="3" y="3" marked="true" color="-1920102913" diameter="294" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+      <line endX="150" startY="285" marked="true" color="-1920102913" endY="15" startX="150"></line>
+      <line endX="285" startY="150" marked="true" color="-1920102913" endY="150" startX="15"></line>
+      <circle x="120" y="120" marked="true" color="-1920102913" diameter="60" filled="true"></circle>
+      <line endX="79" startY="40" marked="true" color="-1920102913" endY="269" startX="216"></line>
+      <line endX="269" startY="84" marked="true" color="-1920102913" endY="221" startX="40"></line>
+      <line endX="269" startY="216" marked="true" color="-1920102913" endY="79" startX="40"></line>
+      <line endX="221" startY="40" marked="true" color="-1920102913" endY="269" startX="84"></line>
+    </shape>
+    <shape name="wolf" rotatable="false" editableColorIndex="0">
+      <polygon color="255" filled="true" marked="false">
+        <point x="253" y="133"></point>
+        <point x="245" y="131"></point>
+        <point x="245" y="133"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="2" y="194"></point>
+        <point x="13" y="197"></point>
+        <point x="30" y="191"></point>
+        <point x="38" y="193"></point>
+        <point x="38" y="205"></point>
+        <point x="20" y="226"></point>
+        <point x="20" y="257"></point>
+        <point x="27" y="265"></point>
+        <point x="38" y="266"></point>
+        <point x="40" y="260"></point>
+        <point x="31" y="253"></point>
+        <point x="31" y="230"></point>
+        <point x="60" y="206"></point>
+        <point x="68" y="198"></point>
+        <point x="75" y="209"></point>
+        <point x="66" y="228"></point>
+        <point x="65" y="243"></point>
+        <point x="82" y="261"></point>
+        <point x="84" y="268"></point>
+        <point x="100" y="267"></point>
+        <point x="103" y="261"></point>
+        <point x="77" y="239"></point>
+        <point x="79" y="231"></point>
+        <point x="100" y="207"></point>
+        <point x="98" y="196"></point>
+        <point x="119" y="201"></point>
+        <point x="143" y="202"></point>
+        <point x="160" y="195"></point>
+        <point x="166" y="210"></point>
+        <point x="172" y="213"></point>
+        <point x="173" y="238"></point>
+        <point x="167" y="251"></point>
+        <point x="160" y="248"></point>
+        <point x="154" y="265"></point>
+        <point x="169" y="264"></point>
+        <point x="178" y="247"></point>
+        <point x="186" y="240"></point>
+        <point x="198" y="260"></point>
+        <point x="200" y="271"></point>
+        <point x="217" y="271"></point>
+        <point x="219" y="262"></point>
+        <point x="207" y="258"></point>
+        <point x="195" y="230"></point>
+        <point x="192" y="198"></point>
+        <point x="210" y="184"></point>
+        <point x="227" y="164"></point>
+        <point x="242" y="144"></point>
+        <point x="259" y="145"></point>
+        <point x="284" y="151"></point>
+        <point x="277" y="141"></point>
+        <point x="293" y="140"></point>
+        <point x="299" y="134"></point>
+        <point x="297" y="127"></point>
+        <point x="273" y="119"></point>
+        <point x="270" y="105"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="-1" y="195"></point>
+        <point x="14" y="180"></point>
+        <point x="36" y="166"></point>
+        <point x="40" y="153"></point>
+        <point x="53" y="140"></point>
+        <point x="82" y="131"></point>
+        <point x="134" y="133"></point>
+        <point x="159" y="126"></point>
+        <point x="188" y="115"></point>
+        <point x="227" y="108"></point>
+        <point x="236" y="102"></point>
+        <point x="238" y="98"></point>
+        <point x="268" y="86"></point>
+        <point x="269" y="92"></point>
+        <point x="281" y="87"></point>
+        <point x="269" y="103"></point>
+        <point x="269" y="113"></point>
+      </polygon>
+    </shape>
+    <shape name="x" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="270" y="75"></point>
+        <point x="225" y="30"></point>
+        <point x="30" y="225"></point>
+        <point x="75" y="270"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="30" y="75"></point>
+        <point x="75" y="30"></point>
+        <point x="270" y="225"></point>
+        <point x="225" y="270"></point>
+      </polygon>
+    </shape>
+  </turtleShapes>
+  <linkShapes>
+    <shape name="default" curviness="0.0">
+      <lines>
+        <line x="-0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+        <line x="0.0" visible="true">
+          <dash value="1.0"></dash>
+          <dash value="0.0"></dash>
+        </line>
+        <line x="0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+      </lines>
+      <indicator>
+        <shape name="link direction" rotatable="true" editableColorIndex="0">
+          <line endX="90" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+          <line endX="210" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+        </shape>
+      </indicator>
+    </shape>
+  </linkShapes>
+  <previewCommands>setup repeat 75 [ go ]</previewCommands>
+</model>
