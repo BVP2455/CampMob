@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <model version="NetLogo 7.0.4" snapToGrid="true">
-  <code><![CDATA[extensions [ gis ]
+  <code><![CDATA[extensions [ gis csv ]
 
 globals 
 [ 
@@ -40,6 +40,15 @@ globals
   
   route-pool
   route-pool-target-size
+  
+  flow-zones-dataset
+  flow-zone-radius
+  flow-counts
+  scheduled-trips
+  outflow-usage
+  selected-flow-slot
+  flow-slot-duration-seconds
+  real-route-cache
 ]
 
 breed [ vehicles vehicle ]
@@ -50,6 +59,7 @@ breed [ buses bus ]
 breed [ nodes node ]
 breed [ waypoints waypoint ]
 directed-link-breed [ edges edge ]
+breed [ flow-zones flow-zone ]
 
 nodes-own [
   node-id
@@ -68,6 +78,20 @@ waypoints-own [
   dist
   previous
   visited?
+]
+
+flow-zones-own [
+  zone-id
+  zone-radius
+
+  pedestrian-in-nodes
+  pedestrian-out-nodes
+
+  bike-in-nodes
+  bike-out-nodes
+
+  car-in-nodes
+  car-out-nodes
 ]
 
 edges-own [
@@ -90,6 +114,9 @@ turtles-own [
   stopped?
   agent-mode
   waiting-time
+  origin-zone-id
+  destination-zone-id
+  scheduled-spawn-time
 ]
 
 vehicles-own [
@@ -128,6 +155,14 @@ to setup
   
   set route-pool []
   set route-pool-target-size 25
+  
+  set flow-zone-radius 0.35
+  set flow-counts []
+  set scheduled-trips []
+  set outflow-usage []
+  set selected-flow-slot 30
+  set flow-slot-duration-seconds 900
+  set real-route-cache []
   
   load-gis
   draw-gis
@@ -190,6 +225,9 @@ to setup-mobile-agent [mode origin destination new-path]
   set stopped? false
   set arrived? false
   set waiting-time 0
+  set origin-zone-id ""
+  set destination-zone-id ""
+  set scheduled-spawn-time -1
 end
 
 to-report speed-kmh-from-mode [mode]
@@ -1382,6 +1420,624 @@ to demo-run
   export-results
 
   user-message "Demo finished. Results exported to outputs/simulation_results.csv"
+end
+
+to setup-real-flow-simulation
+  setup
+
+  set simulation-duration-seconds flow-slot-duration-seconds
+
+  reset-timer
+  load-flow-zones
+  show (word "load-flow-zones time: " timer)
+
+  reset-timer
+  assign-flow-zone-nodes
+  show (word "assign-flow-zone-nodes time: " timer)
+
+  reset-timer
+  load-flow-counts
+  show (word "load-flow-counts time: " timer)
+
+  reset-timer
+  precompute-zone-to-zone-routes
+  show (word "precompute-zone-to-zone-routes time: " timer)
+
+  reset-timer
+  precompute-real-flow-routes
+  show (word "precompute-real-flow-routes time: " timer)
+end
+
+to precompute-zone-to-zone-routes
+  set real-route-cache []
+
+  let transport-modes ["pedestrian" "bike" "car"]
+
+  foreach transport-modes [
+    transport-mode ->
+
+    foreach sort flow-zones [
+      origin-zone ->
+
+      foreach sort flow-zones [
+        target-zone ->
+
+        if [zone-id] of origin-zone != [zone-id] of target-zone [
+
+          let origin-flow get-flow-count selected-flow-slot ([zone-id] of origin-zone) transport-mode "inflow"
+          let target-flow get-flow-count selected-flow-slot ([zone-id] of target-zone) transport-mode "outflow"
+
+          if origin-flow > 0 and target-flow > 0 [
+            show (word "Computing " transport-mode " from " ([zone-id] of origin-zone) " to " ([zone-id] of target-zone))
+            let route build-zone-route transport-mode origin-zone target-zone
+
+            ifelse not empty? route [
+              set real-route-cache lput route real-route-cache
+            ]
+            [
+              show (word "No route found for " transport-mode " from " [zone-id] of origin-zone " to " [zone-id] of target-zone)
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+
+  show (word "Precomputed zone-to-zone routes: " length real-route-cache)
+end
+
+to-report radius-from-zone-id [zid]
+  if zid = "7.1" [ report 2 ]
+  if zid = "7.3" [ report 1.4 ]
+  if zid = "7.4" [ report 2 ]
+  if zid = "7.5" [ report 0.8 ]
+  if zid = "7.6" [ report 2 ]
+
+  report 0.6
+end
+
+to-report build-zone-route [transport-mode origin-zone target-zone]
+  let origin-nodes get-candidate-nodes-from-zone origin-zone transport-mode "inflow"
+  let target-nodes get-candidate-nodes-from-zone target-zone transport-mode "outflow"
+
+  if (not any? origin-nodes) or (not any? target-nodes) [
+    report []
+  ]
+
+  let origin-list sort origin-nodes
+  let target-list sort target-nodes
+
+  set origin-list sort-by [
+    [a b] -> [distance origin-zone] of a < [distance origin-zone] of b
+  ] origin-list
+
+  set target-list sort-by [
+    [a b] -> [distance target-zone] of a < [distance target-zone] of b
+  ] target-list
+
+  set origin-list first-n-items 5 origin-list
+  set target-list first-n-items 5 target-list
+
+  foreach origin-list [
+    origin ->
+
+    foreach target-list [
+      destination ->
+
+      if origin != destination [
+        let new-path shortest-path origin destination transport-mode
+
+        if not empty? new-path [
+          report (list
+            transport-mode
+            ([zone-id] of origin-zone)
+            ([zone-id] of target-zone)
+            origin
+            destination
+            new-path
+          )
+        ]
+      ]
+    ]
+  ]
+
+  report []
+end
+
+to-report first-n-items [n lst]
+  if length lst <= n [
+    report lst
+  ]
+
+  report sublist lst 0 n
+end
+
+to debug-flow-zone-candidates
+  ask flow-zones [
+    show (word
+      "Zone " zone-id
+      " | ped in/out: " count pedestrian-in-nodes "/" count pedestrian-out-nodes
+      " | bike in/out: " count bike-in-nodes "/" count bike-out-nodes
+      " | car in/out: " count car-in-nodes "/" count car-out-nodes
+    )
+  ]
+end
+
+to load-flow-zones
+  set flow-zones-dataset gis:load-dataset "dataNetlogo/In_Out_15min.geojson"
+
+  let created-zone-ids []
+
+  foreach gis:feature-list-of flow-zones-dataset [
+    feat ->
+
+    let name-value word gis:property-value feat "name" ""
+    let zid zone-id-from-name name-value
+
+    if not member? zid created-zone-ids [
+
+      let coords gis:location-of (first (first (gis:vertex-lists-of feat)))
+
+      if not empty? coords [
+        create-flow-zones 1 [
+          setxy item 0 coords item 1 coords
+
+          set zone-id zid
+          set zone-radius radius-from-zone-id zid
+
+          set pedestrian-in-nodes no-turtles
+          set pedestrian-out-nodes no-turtles
+          set bike-in-nodes no-turtles
+          set bike-out-nodes no-turtles
+          set car-in-nodes no-turtles
+          set car-out-nodes no-turtles
+
+          set shape "circle"
+          set size zone-radius
+          set color green
+        ]
+
+        set created-zone-ids lput zid created-zone-ids
+      ]
+    ]
+  ]
+
+  show (word "Loaded flow zones: " count flow-zones)
+end
+
+to assign-flow-zone-nodes
+  ask flow-zones [
+    set pedestrian-in-nodes candidate-nodes-for-zone self "pedestrian" "inflow"
+    set pedestrian-out-nodes candidate-nodes-for-zone self "pedestrian" "outflow"
+
+    set bike-in-nodes candidate-nodes-for-zone self "bike" "inflow"
+    set bike-out-nodes candidate-nodes-for-zone self "bike" "outflow"
+
+    set car-in-nodes candidate-nodes-for-zone self "car" "inflow"
+    set car-out-nodes candidate-nodes-for-zone self "car" "outflow"
+  ]
+end
+
+to-report candidate-nodes-for-zone [z mode direction]
+  let graph-points no-turtles
+
+  if direction = "inflow" [
+    set graph-points (turtle-set nodes waypoints) with [
+      any? my-out-edges with [
+        member? mode allowed-modes
+      ]
+    ]
+  ]
+
+  if direction = "outflow" [
+    set graph-points (turtle-set nodes waypoints) with [
+      any? my-in-edges with [
+        member? mode allowed-modes
+      ]
+    ]
+  ]
+
+  if not any? graph-points [
+    report no-turtles
+  ]
+
+  let nearby graph-points with [
+    distance z <= [zone-radius] of z
+  ]
+
+  if any? nearby [
+    report nearby
+  ]
+
+  ;; fallback: si el círculo no captura nada, usa los 3 nodos compatibles más cercanos
+  report min-n-of 15 graph-points [
+    distance z
+  ]
+end
+
+to-report zone-id-from-name [txt]
+  let result ""
+  let i 0
+
+  while [i < length txt] [
+    let ch substring txt i (i + 1)
+
+    ifelse ch = "_" [
+      set result ""
+    ]
+    [
+      set result word result ch
+    ]
+
+    set i i + 1
+  ]
+
+  report result
+end
+
+to load-flow-counts
+  let rows csv:from-file "dataNetlogo/flow_counts.csv"
+
+  set flow-counts []
+
+  foreach but-first rows [
+    row ->
+
+    let slot-value as-number item 0 row
+    let zid word item 2 row ""
+    let mode word item 3 row ""
+    let direction word item 4 row ""
+    let amount as-number item 5 row
+
+    set flow-counts lput (list slot-value zid mode direction amount) flow-counts
+  ]
+
+  show (word "Loaded flow count rows: " length flow-counts)
+end
+
+to-report as-number [x]
+  if is-number? x [
+    report x
+  ]
+
+  report read-from-string (word x "")
+end
+
+to-report get-flow-count [slot-value zid mode direction]
+  let matches filter [
+    row ->
+      item 0 row = slot-value and
+      item 1 row = zid and
+      item 2 row = mode and
+      item 3 row = direction
+  ] flow-counts
+
+  if empty? matches [
+    report 0
+  ]
+
+  report item 4 first matches
+end
+
+to-report get-candidate-nodes-from-zone [z mode direction]
+  if mode = "pedestrian" [
+    if direction = "inflow" [ report [pedestrian-in-nodes] of z ]
+    if direction = "outflow" [ report [pedestrian-out-nodes] of z ]
+  ]
+
+  if mode = "bike" [
+    if direction = "inflow" [ report [bike-in-nodes] of z ]
+    if direction = "outflow" [ report [bike-out-nodes] of z ]
+  ]
+
+  if mode = "car" [
+    if direction = "inflow" [ report [car-in-nodes] of z ]
+    if direction = "outflow" [ report [car-out-nodes] of z ]
+  ]
+
+  report no-turtles
+end
+
+to-report get-outflow-used [slot-value zid mode]
+  let matches filter [
+    row ->
+      item 0 row = slot-value and
+      item 1 row = zid and
+      item 2 row = mode
+  ] outflow-usage
+
+  if empty? matches [
+    report 0
+  ]
+
+  report item 3 first matches
+end
+
+to increment-outflow-used [slot-value zid mode]
+  let updated []
+  let found? false
+
+  foreach outflow-usage [
+    row ->
+
+    ifelse item 0 row = slot-value and item 1 row = zid and item 2 row = mode [
+      set updated lput (list slot-value zid mode ((item 3 row) + 1)) updated
+      set found? true
+    ]
+    [
+      set updated lput row updated
+    ]
+  ]
+
+  if not found? [
+    set updated lput (list slot-value zid mode 1) updated
+  ]
+
+  set outflow-usage updated
+end
+
+to-report remaining-outflow-weight [slot-value zid mode]
+  let expected get-flow-count slot-value zid mode "outflow"
+  let used get-outflow-used slot-value zid mode
+
+  let remaining expected - used
+
+  if remaining > 0 [
+    report remaining
+  ]
+
+  report 0
+end
+
+to-report choose-weighted-outflow-zone [slot-value mode origin-zone]
+  let options sort flow-zones with [
+    zone-id != [zone-id] of origin-zone and
+    get-flow-count slot-value zone-id mode "outflow" > 0 and
+    any? (get-candidate-nodes-from-zone self mode "outflow")
+  ]
+
+  if empty? options [
+    report nobody
+  ]
+
+  let weights map [
+    z -> remaining-outflow-weight slot-value ([zone-id] of z) mode
+  ] options
+
+  let total sum weights
+
+  ;; Si ya se han cubierto todos los outflows esperados,
+  ;; usamos como fallback el flujo total de salida.
+  if total <= 0 [
+    set weights map [
+      z -> get-flow-count slot-value ([zone-id] of z) mode "outflow"
+    ] options
+
+    set total sum weights
+  ]
+
+  if total <= 0 [
+    report item random length options options
+  ]
+
+  let r random-float total
+  let acc 0
+  let i 0
+
+  while [i < length options] [
+    set acc acc + item i weights
+
+    if r <= acc [
+      report item i options
+    ]
+
+    set i i + 1
+  ]
+
+  report last options
+end
+
+to precompute-real-flow-routes
+  set scheduled-trips []
+  set outflow-usage []
+
+  let inflow-rows filter [
+    row ->
+      item 0 row = selected-flow-slot and
+      item 3 row = "inflow" and
+      item 4 row > 0
+  ] flow-counts
+
+  foreach inflow-rows [
+    row ->
+
+    let slot-value item 0 row
+    let zid item 1 row
+    let mode item 2 row
+    let amount round item 4 row
+
+    let origin-zone one-of flow-zones with [
+      zone-id = zid
+    ]
+
+    if origin-zone != nobody [
+      repeat amount [
+        let trip build-real-flow-trip slot-value mode origin-zone
+
+        ifelse not empty? trip [
+          set scheduled-trips lput trip scheduled-trips
+        ]
+        [
+          set failed-paths failed-paths + 1
+        ]
+      ]
+    ]
+  ]
+
+  set scheduled-trips sort-by [
+    [a b] -> item 0 a < item 0 b
+  ] scheduled-trips
+
+  show (word "Precomputed real trips: " length scheduled-trips)
+  show (word "Failed real trips: " failed-paths)
+end
+
+to-report build-real-flow-trip [slot-value mode origin-zone]
+  let cached-route choose-weighted-cached-route slot-value mode origin-zone
+
+  if empty? cached-route [
+    report []
+  ]
+
+  let target-zid item 2 cached-route
+  let origin item 3 cached-route
+  let destination item 4 cached-route
+  let new-path item 5 cached-route
+
+  increment-outflow-used slot-value target-zid mode
+
+  let spawn-time random-float flow-slot-duration-seconds
+
+  report (list
+    spawn-time
+    mode
+    ([zone-id] of origin-zone)
+    target-zid
+    origin
+    destination
+    new-path
+  )
+end
+
+to-report choose-weighted-cached-route [slot-value mode origin-zone]
+  let candidates filter [
+    r ->
+      item 0 r = mode and
+      item 1 r = [zone-id] of origin-zone
+  ] real-route-cache
+
+  if empty? candidates [
+    report []
+  ]
+
+  let weights map [
+    r -> remaining-outflow-weight slot-value (item 2 r) mode
+  ] candidates
+
+  let total sum weights
+
+  if total <= 0 [
+    set weights map [
+      r -> get-flow-count slot-value (item 2 r) mode "outflow"
+    ] candidates
+
+    set total sum weights
+  ]
+
+  if total <= 0 [
+    report item random length candidates candidates
+  ]
+
+  let r random-float total
+  let acc 0
+  let i 0
+
+  while [i < length candidates] [
+    set acc acc + item i weights
+
+    if r <= acc [
+      report item i candidates
+    ]
+
+    set i i + 1
+  ]
+
+  report last candidates
+end
+
+to create-scheduled-mobile-agent [mode origin destination new-path origin-zid target-zid spawn-time]
+  if mode = "car" [
+    create-vehicles 1 [
+      set color yellow
+      set size 0.5
+      set shape "car"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+    ]
+    stop
+  ]
+
+  if mode = "bike" [
+    create-bicycles 1 [
+      set color pink
+      set size 0.5
+      set shape "wheel"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+    ]
+    stop
+  ]
+
+  if mode = "pedestrian" [
+    create-pedestrians 1 [
+      set color orange
+      set size 0.3
+      set shape "person"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+    ]
+    stop
+  ]
+end
+
+to generate-scheduled-real-agents
+  while [
+    not empty? scheduled-trips and
+    item 0 first scheduled-trips <= sim-time-seconds and
+    count mobile-agents < max-active-vehicles
+  ] [
+
+    let trip first scheduled-trips
+    set scheduled-trips but-first scheduled-trips
+
+    let spawn-time item 0 trip
+    let mode item 1 trip
+    let origin-zid item 2 trip
+    let target-zid item 3 trip
+    let origin item 4 trip
+    let destination item 5 trip
+    let new-path item 6 trip
+
+    create-scheduled-mobile-agent mode origin destination new-path origin-zid target-zid spawn-time
+
+    set generated-vehicles generated-vehicles + 1
+  ]
+end
+
+to go-real-flow
+  if sim-time-seconds >= simulation-duration-seconds [
+    user-message "Real flow simulation finished."
+    stop
+  ]
+
+  generate-scheduled-real-agents
+  update.mobile-agent.speed
+  move.mobile-agents
+
+  set sim-time-seconds sim-time-seconds + seconds-per-tick
+  tick
 end]]></code>
   <widgets>
     <view x="330" wrappingAllowedX="true" y="0" frameRate="30.0" minPycor="-16" height="985" showTickCounter="true" patchSize="38.67" fontSize="10" wrappingAllowedY="true" width="985" tickCounterLabel="ticks" maxPycor="16" updateMode="1" maxPxcor="16" minPxcor="-16"></view>
@@ -1394,13 +2050,13 @@ end]]></code>
     <button x="120" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="90">export-results
 </button>
     <button x="15" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="95" display="export.world">export.world</button>
-    <slider x="15" step="1" y="315" max="50" width="250" display="vehicle-speed-kmh" height="50" min="0" direction="Horizontal" default="25.0" variable="vehicle-speed-kmh"></slider>
+    <slider x="15" step="1" y="315" max="50" width="250" display="vehicle-speed-kmh" height="50" min="0" direction="Horizontal" default="10.0" variable="vehicle-speed-kmh"></slider>
     <slider x="15" step="1" y="375" max="25" width="250" display="number-of-vehicles" height="50" min="1" direction="Horizontal" default="10.0" variable="number-of-vehicles"></slider>
     <button x="15" y="255" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="70">demo-run
 </button>
-    <slider x="15" step="1" y="435" max="2000" width="250" display="simulation-duration-minutes" height="50" min="0" direction="Horizontal" default="10.0" variable="simulation-duration-minutes" units="min"></slider>
+    <slider x="15" step="1" y="435" max="2000" width="250" display="simulation-duration-minutes" height="50" min="0" direction="Horizontal" default="5.0" variable="simulation-duration-minutes" units="min"></slider>
     <slider x="15" step="1" y="495" max="100" width="250" display="vehicle-generation-interval-seconds" height="50" min="0" direction="Horizontal" default="5.0" variable="vehicle-generation-interval-seconds" units="seconds"></slider>
-    <slider x="15" step="1" y="555" max="100" width="250" display="max-active-vehicles" height="50" min="0" direction="Horizontal" default="50.0" variable="max-active-vehicles"></slider>
+    <slider x="15" step="1" y="555" max="100" width="250" display="max-active-vehicles" height="50" min="0" direction="Horizontal" default="82.0" variable="max-active-vehicles"></slider>
     <monitor x="15" precision="17" y="610" height="60" fontSize="11" width="100">sim-clock</monitor>
     <monitor x="120" precision="17" y="610" height="60" fontSize="11" width="100">generated-vehicles</monitor>
     <monitor x="225" precision="17" y="610" height="60" fontSize="11" width="100">completed-trips</monitor>
@@ -1408,13 +2064,15 @@ end]]></code>
     <monitor x="120" precision="17" y="675" height="60" fontSize="11" width="100">failed-paths</monitor>
     <button x="180" y="25" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="95">go-manual</button>
     <button x="220" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="96" display="create.vehicles">create.vehicles</button>
-    <chooser x="100" y="245" height="60" variable="traffic-generation-mode" current="0" width="205" display="traffic-generation-mode">
+    <chooser x="100" y="245" height="60" variable="traffic-generation-mode" current="4" width="205" display="traffic-generation-mode">
       <choice type="string" value="car"></choice>
       <choice type="string" value="bus"></choice>
       <choice type="string" value="bike"></choice>
       <choice type="string" value="pedestrian"></choice>
       <choice type="string" value="mixed"></choice>
     </chooser>
+    <button x="15" y="750" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="160">setup-real-flow-simulation</button>
+    <button x="185" y="750" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="100">go-real-flow</button>
   </widgets>
   <info>## WHAT IS IT?
 
