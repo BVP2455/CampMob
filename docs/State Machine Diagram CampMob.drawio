@@ -1,0 +1,120 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Página-1" id="ufEShjfkIp6mAmxgf69j">
+    <mxGraphModel dx="1336" dy="555" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-1" parent="1" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" value="" vertex="1">
+          <mxGeometry height="30" width="30" x="350" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-2" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-1" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="365" y="100" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-5" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-20" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-5" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="spawn time reached" vertex="1">
+          <mxGeometry relative="1" x="-0.256" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Computed path" vertex="1">
+          <mxGeometry height="30" width="95" x="319" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-6" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="366.5" y="280" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-21" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-6" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="path assigned" vertex="1">
+          <mxGeometry relative="1" x="0.0171" y="3" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Created Agent" vertex="1">
+          <mxGeometry height="30" width="95" x="319" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-8" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="170" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-22" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-8" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="safety distance/priority&amp;nbsp;&lt;div&gt;blocked&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.3364" y="-3" as="geometry">
+            <mxPoint x="-8" y="3" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-17" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="Ub5-NWKbabLdICMJ40Sh-10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-25" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-17" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="reaches next&amp;nbsp;&lt;div&gt;node&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.1838" y="-1" as="geometry">
+            <mxPoint x="18" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Moving" vertex="1">
+          <mxGeometry height="30" width="95" x="319" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-18" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-24" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-18" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="deadlock release" vertex="1">
+          <mxGeometry relative="1" x="-0.3672" y="2" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-19" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="210" y="340" />
+              <mxPoint x="319" y="340" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-23" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-19" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="path free" vertex="1">
+          <mxGeometry relative="1" x="-0.1111" y="-1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Waiting" vertex="1">
+          <mxGeometry height="30" width="95" x="120" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-16" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-26" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="500" y="295" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-27" connectable="0" parent="Ub5-NWKbabLdICMJ40Sh-26" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="next path node&lt;div&gt;exists&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.2" y="-1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Reached Node" vertex="1">
+          <mxGeometry height="30" width="95" x="414" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-15" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="Ub5-NWKbabLdICMJ40Sh-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Arrived Destination" vertex="1">
+          <mxGeometry height="30" width="95" x="414" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-14" edge="1" parent="1" source="Ub5-NWKbabLdICMJ40Sh-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="Ub5-NWKbabLdICMJ40Sh-13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Removed" vertex="1">
+          <mxGeometry height="30" width="95" x="414" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="Ub5-NWKbabLdICMJ40Sh-13" parent="1" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" value="" vertex="1">
+          <mxGeometry height="30" width="30" x="610" y="530" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

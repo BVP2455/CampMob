@@ -1,56 +1,151 @@
-# Campus Mobility Simulation with NetLogo
+# CampusMob with NetLogo
 
-This project implements a multi-agent mobility simulation model in NetLogo using real geographic data. The objective is to represent and analyze mobility flows in a university campus environment through a graph-based transport network.
+This project is a multi-agent mobility simulation developed in NetLogo.
+The goal is to simulate mobility flows on a university campus using GIS data, graph-based routing and different types of agents.
 
-The model loads GIS data, builds a directed graph from road geometries, and simulates different types of mobile agents such as cars, buses, bicycles and pedestrians. Each agent moves through the network according to its transport mode, available routes, speed and basic traffic interaction rules.
+The model is built from shapefiles and represents the campus as a directed graph. Each edge contains information about the transport modes that are allowed to use it.
 
 ## Main Features
 
-* GIS-based map loading using the NetLogo GIS extension.
-* Construction of a directed graph from geographic road data.
-* Support for multiple mobility modes:
+* GIS-based campus map loading
+* Graph construction from shapefiles
+* Directed links and mode-specific accessibility
+* Four types of agents:
+  * cars
+  * buses
+  * bicycles
+  * pedestrians
+* Shortest-path routing
+* Random origin and destination generation
+* Fixed-duration simulation
+* Basic congestion behaviours:
+  * safety distance
+  * waiting time
+  * intersection priority
+  * roundabout priority
+* Integration of real inflow/outflow data using GeoJSON-to-CSV script.
 
-  * Cars
-  * Buses
-  * Bicycles
-  * Pedestrians
-* Mode-specific routing based on allowed road types.
-* Shortest-path calculation using a Dijkstra-based algorithm.
-* Use of intermediate waypoints to preserve road geometry.
-* Basic traffic behavior:
+## Simulation Modes
 
-  * Safety distance between agents
-  * Intersection handling
-  * Roundabout priority
-  * Waiting time management
-* Random route precomputation for simulation efficiency.
-* Basic simulation metrics such as generated agents, completed trips and failed paths.
+The model currently has two main simulation modes.
 
-## Project Context
+## 1. Random Origin/Destination Mode
 
-This project was developed as part of a research internship at IRIT and is intended to support a final degree project focused on mobility simulation.
+This mode is mainly used for testing.
 
-The long-term goal is to integrate real mobility data, including GeoJSON-based datasets and movement observations, in order to calibrate the simulation and analyze different mobility scenarios inside a campus area.
+Agents are generated with random valid origins and destinations. The model selects graph nodes compatible with the selected transport mode and computes a shortest path between them.
 
-## Technical Overview
+Main procedures:
 
-The simulation follows this general workflow:
+```netlogo
+initialize-simulation
+go
+```
 
-1. Load geographic datasets.
-2. Build graph nodes and directed edges.
-3. Assign allowed transport modes to each road segment.
-4. Create turn connectors between compatible road directions.
-5. Detect intersections and roundabout nodes.
-6. Precompute valid routes for each transport mode.
-7. Generate mobile agents during the simulation.
-8. Move agents through the graph while applying traffic rules.
-9. Export or analyze simulation results.
+The `go` button should be used as a forever button.
 
-## Technologies Used
+## 2. Real Flow
 
-* NetLogo
-* NetLogo GIS extension
-* GIS vector data
-* Directed graph modeling
-* Multi-agent simulation
+## Real Flow Data
 
+The real flow data is originally provided as a GeoJSON file.
+
+This GeoJSON contains measurement points for a full day. Each measurement point corresponds to a specific zone, transport modality and count type (`inflow` or `outflow`). The flow values are aggregated into 15-minute time slots.
+
+The GeoJSON does not provide individual trajectories or origin-destination pairs. It only provides observed counts at measurement points.
+
+A Python preprocessing script is used to extract the flow profiles from the GeoJSON and convert them into a CSV file that can be read more easily by NetLogo.
+
+## Real Flow Model
+
+In the real flow mode, agents are generated from observed inflow counts.
+
+For a selected 15-minute time slot, NetLogo reads the inflow values from the CSV file and creates the corresponding number of agents for each zone and transport mode.
+
+The model then assigns each agent a destination using the available outflow counts for the same transport mode.
+
+Since the GeoJSON does not provide individual origin-destination trajectories, the destination is not directly known.
+It is estimated using the outflow distribution and the valid precomputed routes between flow zones.
+
+The main procedures are:
+
+setup-real-flow-simulation
+go-real-flow
+
+The setup-real-flow-simulation procedure loads the network, creates the flow zones, loads the CSV flow counts, precomputes valid zone-to-zone routes and prepares the scheduled trips.
+
+The go-real-flow procedure runs the simulation and generates agents according to their scheduled spawn times.
+
+## Real Flow Logic
+
+The real flow simulation follows these steps:
+
+1. Load the campus GIS data
+2. Build the graph
+3. Load measurement points from the GeoJSON file as flow zones
+4. Assign nearby graph nodes to each flow zone according to transport mode and count type
+5. Load the 15-minute inflow/outflow counts from the CSV file
+6. Precompute valid routes between zones
+7. Generate agents according to the observed flows
+8. Move agents through the network
+
+For each agent, the destination is selected using the available outflow data for the same transport mode.
+
+## Agent Types
+
+The model supports four transport modes:
+
+* `car`
+* `bus`
+* `bike`
+* `pedestrian`
+
+Each agent can only move through edges where its mode is allowed.
+
+In the current real-flow dataset, the `vehicle` modality is interpreted as `car`.
+
+## Current Status
+
+Implemented:
+
+* GIS loading
+* graph construction
+* four agent types
+* mode-specific routing
+* random simulation mode
+* fixed simulation duration
+* basic congestion behaviours
+* real flow data loading
+* flow zones
+* route precomputation
+* scheduled agent generation
+
+Still in progress:
+
+* improving the connection between flow zones and graph nodes
+* reducing missing zone-to-zone routes
+* exporting congestion metrics
+* validating results with real data
+* completing technical documentation and diagrams
+
+## Current Limitations
+
+The model is still a prototype.
+
+Some limitations are:
+
+* flow zones are approximated using circular areas
+* some routes are still missing for certain transport modes
+* real data is aggregated in 15-minute intervals
+* congestion is currently represented behaviourally, but quantitative metrics are still being developed
+
+## Future Work
+
+Next steps:
+
+* improve candidate node selection inside flow zones
+* improve route precomputation
+* reduce failed paths
+* export simulation metrics
+* define and test mobility scenarios
+* complete UML or architecture diagrams
