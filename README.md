@@ -1,151 +1,383 @@
-# CampusMob with NetLogo
+# Rangueil Campus Mobility Simulation
 
-This project is a multi-agent mobility simulation developed in NetLogo.
-The goal is to simulate mobility flows on a university campus using GIS data, graph-based routing and different types of agents.
+## 1. Overview
 
-The model is built from shapefiles and represents the campus as a directed graph. Each edge contains information about the transport modes that are allowed to use it.
+This NetLogo model simulates multimodal mobility on the Rangueil campus using GIS transport networks and observed 15-minute inflow/outflow data.
 
-## Main Features
+The main operational mode is the **real-flow simulation**, which currently creates:
 
-* GIS-based campus map loading
-* Graph construction from shapefiles
-* Directed links and mode-specific accessibility
-* Four types of agents:
-  * cars
-  * buses
-  * bicycles
-  * pedestrians
-* Shortest-path routing
-* Random origin and destination generation
-* Fixed-duration simulation
-* Basic congestion behaviours:
-  * safety distance
-  * waiting time
-  * intersection priority
-  * roundabout priority
-* Integration of real inflow/outflow data using GeoJSON-to-CSV script.
+- Cars
+- Bicycles
+- Pedestrians
 
-## Simulation Modes
+The model also includes general support for buses in the random traffic mode.
 
-The model currently has two main simulation modes.
+Main features:
 
-## 1. Random Origin/Destination Mode
+- Directed multimodal transport graph
+- Weighted shortest-path routing
+- Real-flow trip generation
+- Simplified traffic interactions
+- Trip, congestion and speed indicators
+- Multimodal copresence analysis
+- Multimodal encounter detection
+- Encounter heatmap
+- Repeated simulation runs
+- CSV and PNG exports
+- External box-plot generation with Python
 
-This mode is mainly used for testing.
+## 2. Project Structure
 
-Agents are generated with random valid origins and destinations. The model selects graph nodes compatible with the selected transport mode and computes a shortest path between them.
-
-Main procedures:
-
-```netlogo
-initialize-simulation
-go
+```text
+project-folder/
+│
+├── campus_model.nlogo
+├── data/
+│   └── 10731/
+│       ├── buildings_gross.shp
+│       ├── Roads_gross.shp
+│       ├── zone.shp
+│       ├── Netlogo_nodes.shp
+│       ├── osmRoads.shp
+│       └── In_Out_15min.geojson
+│
+├── dataNetlogo/
+│   └── flow_counts.csv
+│
+├── outputs/
+│
+└── boxplots_netlogo.py
 ```
 
-The `go` button should be used as a forever button.
+The `outputs` folder must exist before running the model.
 
-## 2. Real Flow
+## 3. Data and Transport Network
 
-## Real Flow Data
+The model loads GIS files from:
 
-The real flow data is originally provided as a GeoJSON file.
+```text
+data/10731/
+```
 
-This GeoJSON contains measurement points for a full day. Each measurement point corresponds to a specific zone, transport modality and count type (`inflow` or `outflow`). The flow values are aggregated into 15-minute time slots.
+These datasets define:
 
-The GeoJSON does not provide individual trajectories or origin-destination pairs. It only provides observed counts at measurement points.
+- Buildings
+- Campus zones
+- Graph nodes
+- Road geometries
+- Flow-zone locations
 
-A Python preprocessing script is used to extract the flow profiles from the GeoJSON and convert them into a CSV file that can be read more easily by NetLogo.
+Observed mobility flows are read from:
 
-## Real Flow Model
+```text
+dataNetlogo/flow_counts.csv
+```
 
-In the real flow mode, agents are generated from observed inflow counts.
+Each row contains:
 
-For a selected 15-minute time slot, NetLogo reads the inflow values from the CSV file and creates the corresponding number of agents for each zone and transport mode.
+- 15-minute slot
+- Zone
+- Transport mode
+- Direction (`inflow` / `outflow`)
+- Number of agents
 
-The model then assigns each agent a destination using the available outflow counts for the same transport mode.
+The real-flow mode currently uses:
 
-Since the GeoJSON does not provide individual origin-destination trajectories, the destination is not directly known.
-It is estimated using the outflow distribution and the valid precomputed routes between flow zones.
+```text
+car
+bike
+pedestrian
+```
 
-The main procedures are:
+The GIS network is converted into a directed graph formed by `nodes`, `waypoints` and directed `edges`. Each edge stores its length and the transport modes that can use it.
 
+## 4. Routing
+
+The model uses a custom weighted Dijkstra implementation:
+
+```netlogo
+shortest-path
+```
+
+Routes are calculated using:
+
+```text
+road-length
+```
+
+as edge weight and are filtered according to the agent transport mode.
+
+The model does **not** currently use the NetLogo `nw` extension.
+
+For real-flow simulations, required zone-to-zone routes are precomputed and stored in:
+
+```netlogo
+real-route-cache
+```
+
+This avoids recalculating shortest paths for every agent during the simulation.
+
+## 5. Real-Flow Simulation
+
+Initialise a real-flow simulation with:
+
+```netlogo
 setup-real-flow-simulation
+```
+
+The procedure:
+
+1. Loads the GIS network
+2. Loads the flow zones
+3. Assigns compatible graph points to each zone
+4. Loads flow counts
+5. Selects the requested 15-minute slots
+6. Precomputes required routes
+7. Creates the scheduled trip list
+
+The starting flow slot is controlled by:
+
+```text
+selected-flow-slot
+```
+
+and the duration by:
+
+```text
+simulation-duration-minutes
+```
+
+The duration should normally be selected in multiples of 15 minutes.
+
+A useful test configuration is:
+
+```text
+selected-flow-slot = 48
+simulation-duration-minutes = 15
+```
+
+Run the simulation with:
+
+```netlogo
 go-real-flow
+```
 
-The setup-real-flow-simulation procedure loads the network, creates the flow zones, loads the CSV flow counts, precomputes valid zone-to-zone routes and prepares the scheduled trips.
+The simulation finishes after the configured flow period has ended and all scheduled and active agents have completed their trips.
 
-The go-real-flow procedure runs the simulation and generates agents according to their scheduled spawn times.
+## 6. Agent Movement
 
-## Real Flow Logic
+Agents move through the directed graph following their precomputed route.
 
-The real flow simulation follows these steps:
+The movement model includes simplified:
 
-1. Load the campus GIS data
-2. Build the graph
-3. Load measurement points from the GeoJSON file as flow zones
-4. Assign nearby graph nodes to each flow zone according to transport mode and count type
-5. Load the 15-minute inflow/outflow counts from the CSV file
-6. Precompute valid routes between zones
-7. Generate agents according to the observed flows
-8. Move agents through the network
+- Same-segment following
+- Safety distance
+- Intersection priority
+- Roundabout priority
+- Deadlock release
 
-For each agent, the destination is selected using the available outflow data for the same transport mode.
+Speeds are specified in km/h and converted to NetLogo units per tick.
 
-## Agent Types
+Important time and scale values include:
 
-The model supports four transport modes:
+```netlogo
+seconds-per-tick
+meters-per-netlogo-unit
+movement-step-size
+```
 
-* `car`
-* `bus`
-* `bike`
-* `pedestrian`
+Each agent also receives an individual speed factor from a bounded normal distribution.
 
-Each agent can only move through edges where its mode is allowed.
+## 7. Metrics
 
-In the current real-flow dataset, the `vehicle` modality is interpreted as `car`.
+When an agent reaches its destination, the model stores:
 
-## Current Status
+- Transport mode
+- Trajectory duration
+- Average speed
+- Travelled distance
+- Congestion duration
+- Low-speed duration
+- Intermediate-speed duration
+- High-speed duration
+- Copresence percentages
+- Origin zone
+- Destination zone
+- Flow slot
+- Scheduled spawn time
+- Arrival time
 
-Implemented:
+Trajectory duration is measured from the moment the agent is actually created in the simulation until it reaches its destination.
 
-* GIS loading
-* graph construction
-* four agent types
-* mode-specific routing
-* random simulation mode
-* fixed simulation duration
-* basic congestion behaviours
-* real flow data loading
-* flow zones
-* route precomputation
-* scheduled agent generation
+## 8. Copresence and Encounters
 
-Still in progress:
+### Copresence
 
-* improving the connection between flow zones and graph nodes
-* reducing missing zone-to-zone routes
-* exporting congestion metrics
-* validating results with real data
-* completing technical documentation and diagrams
+Copresence measures the percentage of trip time spent near agents of a **different transport mode**.
 
-## Current Limitations
+Same-mode copresence is not counted.
 
-The model is still a prototype.
+Current distance thresholds are:
 
-Some limitations are:
+```text
+Car:        5 m
+Bicycle:    3 m
+Pedestrian: 2 m
+```
 
-* flow zones are approximated using circular areas
-* some routes are still missing for certain transport modes
-* real data is aggregated in 15-minute intervals
-* congestion is currently represented behaviourally, but quantitative metrics are still being developed
+### Encounters
 
-## Future Work
+Encounter events are recorded separately.
 
-Next steps:
+An encounter is created when two agents of **different modes** are within:
 
-* improve candidate node selection inside flow zones
-* improve route precomputation
-* reduce failed paths
-* export simulation metrics
-* define and test mobility scenarios
-* complete UML or architecture diagrams
+```text
+5 m
+```
+
+Each encounter stores:
+
+- Agent IDs and modes
+- Start and end time
+- Duration
+- Start and end midpoint
+- Minimum distance
+
+Encounter data are stored in `completed-encounters` and exported at the end of each run.
+
+## 9. Encounter Heatmap
+
+The model includes a dynamic heatmap based on multimodal encounter locations.
+
+Each patch stores the number of encounter events that started on it:
+
+```netlogo
+encounter-count
+```
+
+The heatmap is controlled with:
+
+```text
+show-encounter-heatmap?
+```
+
+Hotter areas represent locations where more multimodal encounters occurred.
+
+The final heatmap can be exported as:
+
+```text
+outputs/encounter_heatmap_run_X.png
+```
+
+The heatmap is intended as a visual analysis tool. Quantitative encounter analysis should be based on the exported CSV data.
+
+## 10. Multiple Runs and Box Plots
+
+Repeated simulations can be executed using:
+
+```netlogo
+run-multiple-simulations
+```
+
+The number of repetitions is controlled by:
+
+```text
+number-of-runs
+```
+
+Each run starts from a fresh simulation state and exports its own results.
+
+The Python script:
+
+```text
+boxplots_netlogo.py
+```
+
+reads the exported `trip_results_run_*.csv` files and generates box plots for:
+
+- Trajectory duration
+- Average speed
+- Travelled distance
+- Congestion
+- Copresence
+
+The script can be used to compare transport modes and repeated simulation runs.
+
+## 11. Outputs
+
+Each run can generate:
+
+### Trip results
+
+```text
+outputs/trip_results_run_X.csv
+```
+
+One row per completed trip.
+
+### Simulation summary
+
+```text
+outputs/simulation_summary_run_X.csv
+```
+
+Summary values for:
+
+```text
+all
+car
+bike
+pedestrian
+```
+
+### Encounter events
+
+```text
+outputs/encounters_run_X.csv
+```
+
+One row per completed multimodal encounter.
+
+### Encounter heatmap
+
+```text
+outputs/encounter_heatmap_run_X.png
+```
+
+Final visual representation of encounter concentration.
+
+The run identifier is selected automatically using the next available output number.
+
+## 12. Current Limitations
+
+The main current limitations are:
+
+- The custom Dijkstra implementation does not use a priority queue and may be slower than the NetLogo `nw` extension.
+- Some origin/mode combinations may fail to obtain a valid cached route and are counted as `failed_paths`.
+- Encounter coordinates are exported as NetLogo `xcor` / `ycor`, not original GIS coordinates.
+- Copresence and encounter detection use different distance thresholds.
+- Buses are not currently generated in the real-flow mode.
+- Traffic rules are simplified and do not represent a full microscopic traffic model.
+- The full GIS graph is rebuilt before every batch run, increasing computation time.
+- Results for modes with very few agents should be interpreted carefully.
+
+## 13. Quick Start
+
+Recommended sequence:
+
+```text
+1. Open the NetLogo model
+2. Confirm that the data folders and outputs folder exist
+3. Select an active flow slot
+4. Set the simulation duration
+5. Run setup-real-flow-simulation
+6. Check that precomputed trips are greater than zero
+7. Run go-real-flow
+8. Review the exported CSV and heatmap files
+9. Use run-multiple-simulations for repeated experiments
+10. Run boxplots_netlogo.py for post-processing
+```
+
+## 14. Model Summary
+
+The model converts the Rangueil campus GIS network into a directed multimodal graph and uses observed 15-minute inflow/outflow data to generate scheduled trips. Agents follow weighted shortest paths compatible with their transport mode, interact through simplified mobility rules, and produce trip, congestion, copresence and encounter indicators. Results can be exported for repeated statistical analysis and spatial visualisation.
