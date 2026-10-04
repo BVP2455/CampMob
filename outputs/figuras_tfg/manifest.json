@@ -1,0 +1,469 @@
+{
+  "inputs": [
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_10.csv",
+      "rows": 129,
+      "sha256": "d59beeed26c8a53fc6d7febea12e5982b10d76838ba294a5ca822ea50216e193"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_11.csv",
+      "rows": 91,
+      "sha256": "80f14fff1cb72e8086b693ab5a60322d80aad9e5a18a9a99f3f6ff971807168a"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_12.csv",
+      "rows": 93,
+      "sha256": "2f525c90f68504b235c997e5cbdbb0eaecaae49c0b84506bd5d5bf40b6185eb1"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_13.csv",
+      "rows": 110,
+      "sha256": "2c70075b65073fc6be02e3eb53753a94a3235d5afd20704e370a62ac841b04c8"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_4.csv",
+      "rows": 116,
+      "sha256": "3a323a2be1999c9b2f80b388ecd7375cdb11ece1bff48566dd0603bfcf847416"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_5.csv",
+      "rows": 118,
+      "sha256": "c86e30f77bca868c1290b9c0f321210c86a700b10ebd426cf1737c5fd44cbe34"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_6.csv",
+      "rows": 142,
+      "sha256": "c504bd7a3e16e337556496e81891aed15687a9ed11097879574514a51179c2a2"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_7.csv",
+      "rows": 89,
+      "sha256": "28824c42478608bdc2b2fdd3f67c44c2bd5e246982fa92aed031a6bc34bd5dc8"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_8.csv",
+      "rows": 93,
+      "sha256": "551b4ea69fc347ec221e0d8ab52cee565bfe34a5209e1e2e9d30c59b1faf5e28"
+    },
+    {
+      "source": "Factor1.zip/Factor1/encounters_run_9.csv",
+      "rows": 102,
+      "sha256": "32dec6a47737153b848d5194390bf0b23390611a6874ac019d38e83b03563683"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_10.csv",
+      "rows": 4,
+      "sha256": "73f3cc3bbedb3434f938614e1916d6055996b136bff5cdac4d61adbf1e2db4f4"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_11.csv",
+      "rows": 4,
+      "sha256": "59734c9a85287a5274522f50ca704e6d174b50eef3a55a21a967730952f6d518"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_12.csv",
+      "rows": 4,
+      "sha256": "904f28a1c6088250719d92e442d0957e09f2bd59ea5c06b441a4fb4ac2d58823"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_13.csv",
+      "rows": 4,
+      "sha256": "f7940fd0fab2ab9d434d0c5a6732c79684c3645527493bea92d49b15163639f0"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_4.csv",
+      "rows": 4,
+      "sha256": "c8fa2b1d8e4e1218eb9182fd8e6b8e9aa355ca9dd0f720caaec0f93ebb7549d5"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_5.csv",
+      "rows": 4,
+      "sha256": "5f86cb8ca0070d8afbde15c4b5355eefd0fec08afefebc4178b55588de6c9d9a"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_6.csv",
+      "rows": 4,
+      "sha256": "8c9ef366eb6e00ea6317e5118af2e32f9b0e9e15e3b5dfc6073ab977b595fb11"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_7.csv",
+      "rows": 4,
+      "sha256": "70e65e1afd82e32517b58945dafbc8341436523b4e952f9400f76afe1a75e454"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_8.csv",
+      "rows": 4,
+      "sha256": "28a73d39a9f871711230b5f43a9abb8cd9f6699a8df088adf785832d7c4652b5"
+    },
+    {
+      "source": "Factor1.zip/Factor1/simulation_summary_run_9.csv",
+      "rows": 4,
+      "sha256": "a8edfc9f0ba17769e6d89f3f3f3e07770c432184a017a8c72bb857c00af2cd8b"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_10.csv",
+      "rows": 139,
+      "sha256": "967579246bcb681e6d6562919461caca5e9e22e394fbc1d1dfa2fe590a062d99"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_11.csv",
+      "rows": 139,
+      "sha256": "75ecf3063cb0292352101165e6140e8223017cc1e9a7248eb3c0fe4a9960e98e"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_12.csv",
+      "rows": 139,
+      "sha256": "b4100127062c7e37173acc0255deea285ace548911ed3cda5d1923cc481ad0dc"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_13.csv",
+      "rows": 139,
+      "sha256": "35817b98b87fdf68e27bbb11ab885297c0ae5a63d5d6e5829fe9c2fe9b8dfd16"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_4.csv",
+      "rows": 139,
+      "sha256": "786e5f06ce49efcad1edfd8448489cc0509b108786ae086bac998ea629bcf927"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_5.csv",
+      "rows": 139,
+      "sha256": "d2f502e17744ee0e8b4092667aab671f012852ac4cc6afd47105ce2f1b0e9c7b"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_6.csv",
+      "rows": 139,
+      "sha256": "64197890cc365c411826891d4f79b9eefaea7e99260a54073185b47918b56267"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_7.csv",
+      "rows": 139,
+      "sha256": "50e8177bb823307369e09211a337ffe29a7743793e39b80bac163a168db77175"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_8.csv",
+      "rows": 139,
+      "sha256": "c214ab19cae43ba97d40f3dbf54561a5f06c04caa038b884c00f814f5638485a"
+    },
+    {
+      "source": "Factor1.zip/Factor1/trip_results_run_9.csv",
+      "rows": 139,
+      "sha256": "0a2e0803cae82b4eac6d5a352d2ddc6fd4d20783e1dd3860c71924019d67a450"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_1.csv",
+      "rows": 457,
+      "sha256": "7261f6a521b285734ce581d58907702d82f1d81965367853740a6e3f3248bec3"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_10.csv",
+      "rows": 370,
+      "sha256": "76443e4a2dafbec79b5374d6db8c54780fd999e402365266132016f5eb1ae490"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_2.csv",
+      "rows": 362,
+      "sha256": "b041848ba1842c32cfc618049b826004d0c2bf55f054763e2aa8efb24d74b4a2"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_3.csv",
+      "rows": 488,
+      "sha256": "def94a4b1f6dc1496008451f7db3a827e879b9cd566bc2a2c71cf231af75fb59"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_4.csv",
+      "rows": 404,
+      "sha256": "eaed49ecf6420d85969289b87f9484f9fc54f0ac50d0111e8e462694b34abb3b"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_5.csv",
+      "rows": 446,
+      "sha256": "6a6ff0327d02aec28ce8ad42c1ef209dedce4c20d7ea15a6e52a4039f9b700b2"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_6.csv",
+      "rows": 395,
+      "sha256": "e23568a6aa3b30f4c025824f83695ad057b82354ab446912062ab9e8534a87e2"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_7.csv",
+      "rows": 652,
+      "sha256": "05c7deae2de19eecf6d9d318091c4b73ad44b69327a66bc4b18c905d6e13147e"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_8.csv",
+      "rows": 374,
+      "sha256": "a7c158102d6126dabb9cb35c7c2b361494cd5c5bd21643916e5796bba14fb671"
+    },
+    {
+      "source": "Factor2.zip/Factor2/encounters_run_9.csv",
+      "rows": 391,
+      "sha256": "f9b7c89c6d64d33828584307444ebc722d91f49f9a65bf40cb1203e6123f6625"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_1.csv",
+      "rows": 4,
+      "sha256": "856a2b9cb18e43ba97364b120c309c466a0879dd83709aaff53b9cd858e8d20a"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_10.csv",
+      "rows": 4,
+      "sha256": "fe33416d1506e011ba8ba530439f8e0f170f441b947bd228ab313cf8472a1e53"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_2.csv",
+      "rows": 4,
+      "sha256": "8dbd8332eeed3433358fe2463256d8c7c4f23b5656beb58dcccfa2870b3cdea2"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_3.csv",
+      "rows": 4,
+      "sha256": "8f917741b6c7038233ab09d78594e3d07eccac57eb702f1f0515cfb72e219200"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_4.csv",
+      "rows": 4,
+      "sha256": "806965fa54faff9f524077576c52ed736ff087229a677f4799f4ab3d9d9b6659"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_5.csv",
+      "rows": 4,
+      "sha256": "43137a3780b7ddddd4c385a62dbf7fc19d369110b84331fb3f35bbe1094c93e6"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_6.csv",
+      "rows": 4,
+      "sha256": "7fffa3d03747674886ebc493db6b32ef47a8fa4e23ce39cb3d26ece8345734b2"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_7.csv",
+      "rows": 4,
+      "sha256": "41f38179f423e856ff7bc2dd1894ea31e34fff2517fa41fc8796d3c836468d0d"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_8.csv",
+      "rows": 4,
+      "sha256": "7da1f4269477ba3b63fbfd1f2a4e74ef86eb9b670cf6f092d29d34b4fb8c7d0c"
+    },
+    {
+      "source": "Factor2.zip/Factor2/simulation_summary_run_9.csv",
+      "rows": 4,
+      "sha256": "413ae51d9f7c449cfb58c57615b48c3c8097801c14c2cfc47cdd1a409c9dbe4e"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_1.csv",
+      "rows": 278,
+      "sha256": "fb86f760c67370cbe380f326ff8fa83122990e35cf3c2d92776555b8a835f73d"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_10.csv",
+      "rows": 278,
+      "sha256": "783ab7ea7f0272335178515832149dc5756d0f3ebd9de9afa20dc6d5cfbf4b82"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_2.csv",
+      "rows": 278,
+      "sha256": "e5a3cae5b71b555db411de8a893a48c95580914bbd5f0b9a8e5fc3090ab909c1"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_3.csv",
+      "rows": 278,
+      "sha256": "43acac28d98f6201dd815d8ab24372234ac1f570973e45b6aa79fef8370d6b39"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_4.csv",
+      "rows": 278,
+      "sha256": "54109c5225c3c4013dab51eca6e957ca5dc5d0a8abf9fdc31d48ea43a1c97c71"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_5.csv",
+      "rows": 278,
+      "sha256": "3e0ad5e50f030801a72a68677adcb8f3f6b3010031c6b144bfddd794dd880118"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_6.csv",
+      "rows": 278,
+      "sha256": "af78020e84788c4b7b97d0622dde637397f1f7eb2cd2dff02411eb983392e39e"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_7.csv",
+      "rows": 278,
+      "sha256": "675f7082accb68d61fb6ac3d8cd0196d2ed60147a37b9d40f58320bf1130538d"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_8.csv",
+      "rows": 278,
+      "sha256": "343911a24b82c4d3154eb15dd5b6c38e6dde9c18435dee36edffc74f7351c45a"
+    },
+    {
+      "source": "Factor2.zip/Factor2/trip_results_run_9.csv",
+      "rows": 278,
+      "sha256": "62466949c1691149fbdef92099a2aadb89d1fc273e20d77334c222a333f93247"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_1.csv",
+      "rows": 984,
+      "sha256": "7ab5860856f6ebefe90e6da1263d655155a99aa3ef68124e9a257e57e211d6d1"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_11.csv",
+      "rows": 1040,
+      "sha256": "439b3b83c2fc977babfcc72062d645d621804b9affbec2bc68a15846bce36b21"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_2.csv",
+      "rows": 1210,
+      "sha256": "6b2a1077c8dfe095f6bf366010b550da00979af852ff9dd5e18496435d1e021c"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_3.csv",
+      "rows": 1077,
+      "sha256": "6252fb90a36eaae5746d782ccd73ded754591bb71f77de1be57530f701257858"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_4.csv",
+      "rows": 1087,
+      "sha256": "6c89bb13fcfcd46fce15919d5cb03ff929f45c0924c6994f06eec80839434b01"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_5.csv",
+      "rows": 923,
+      "sha256": "f1acfc0aacbb4386ab10957c24c7b38b8316512065ab974e618e41573cdb6170"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_6.csv",
+      "rows": 1505,
+      "sha256": "ef346e9ea25a45ddbcb0f753dd8615b0dc0b1c47d2ab16abc8a5f7de6560cda7"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_7.csv",
+      "rows": 859,
+      "sha256": "0b41b15f08b672fc725ccf97b231430495c2bd1852c8e0a1ec507b4bdf40d05e"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_8.csv",
+      "rows": 793,
+      "sha256": "888d5a6afbd8701f978904d43dc57a7b76c35aa3e99fac5deaba959d800855e5"
+    },
+    {
+      "source": "Factor3.zip/Factor3/encounters_run_9.csv",
+      "rows": 988,
+      "sha256": "f00f97ae038f9c7b6c3e027d888f9e892e8755a74d11278b997d371d89923a86"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_1.csv",
+      "rows": 4,
+      "sha256": "4f553b61e61ea637e06dbb703661deeca760c47444e4b22677e0cf916999431a"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_11.csv",
+      "rows": 4,
+      "sha256": "9eac5095c3f40b1ee90609bb2231b68752287332f4e76a0578abeaf0b2209094"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_2.csv",
+      "rows": 4,
+      "sha256": "00ff200d1d83e2d44a7e404c4c1b2d70eb867f91b87c6437eb9fa3973bc87e77"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_3.csv",
+      "rows": 4,
+      "sha256": "54429ecc336b15127bb91970ef68366799c00a0b1479b9138fa3cfb2a63c7095"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_4.csv",
+      "rows": 4,
+      "sha256": "89ef245ed0c2f912f7e649323c7ce43bb4a8d672c3c663ecf7a73b90e18983f5"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_5.csv",
+      "rows": 4,
+      "sha256": "ae164e7055391d528c6047aa9f8a38da0fb368bb5c7860da2a906d7a257c2b14"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_6.csv",
+      "rows": 4,
+      "sha256": "3261fe99711d95d367611cb6628e8a27c8115707a0cf0ef2f5f6c389ddbf4af4"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_7.csv",
+      "rows": 4,
+      "sha256": "da97fcd863c223d840dace080dd271a9b7eaba744aecc3a2dd61e0db4fccaaf7"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_8.csv",
+      "rows": 4,
+      "sha256": "2b207d60275b57e8b299bf2d4c66a8dfb2fab6a70e213534f07c4b612d5d22ed"
+    },
+    {
+      "source": "Factor3.zip/Factor3/simulation_summary_run_9.csv",
+      "rows": 4,
+      "sha256": "82313815f783fad6db3fbc1d0b4e7dae85d5c868ecd694a38bdec05b403c653e"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_1.csv",
+      "rows": 417,
+      "sha256": "664cf98c3394fdd778011e53f618127c6f951874ae4ac039f6c5f6390f88002a"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_11.csv",
+      "rows": 417,
+      "sha256": "2836799cd099a89537f2c851639c766131e802898463439dd8a0e99375ed4992"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_2.csv",
+      "rows": 417,
+      "sha256": "5d87c7249d662104459ce7e5c8272ccb54473e529267c0fb59f16aa08abfe44e"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_3.csv",
+      "rows": 417,
+      "sha256": "bcb34d450050234fc4bd373f9b2290f49f309ab18f10da47e9bd6c60b160e1ca"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_4.csv",
+      "rows": 417,
+      "sha256": "b06603873106b6f48aa89d3bb0cbb44809b25aa77ce3afe401e8b4afdcd3e366"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_5.csv",
+      "rows": 417,
+      "sha256": "20a1d0ec27dac9f65c06f6fd0f2cb3bd53c890538f4ea6832aa8ce24c0a04878"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_6.csv",
+      "rows": 417,
+      "sha256": "6d472fd8c98919f50a3b96345dc6268ff39a7a6d59a242369063d553184643de"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_7.csv",
+      "rows": 417,
+      "sha256": "e1e4b45be410c3caf4a01c230f16940911958fd4d84be9338e23948a3eccf1f2"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_8.csv",
+      "rows": 417,
+      "sha256": "d77cd5185d0a0f6a9064b9b96e55911a686dea3309db32cdec2521d0759659fa"
+    },
+    {
+      "source": "Factor3.zip/Factor3/trip_results_run_9.csv",
+      "rows": 417,
+      "sha256": "a74141d0bf08e786623afe7f47b423ab2cebac553de13504b507156f2c2b9586"
+    }
+  ],
+  "parameters": {
+    "inputs": [
+      "Factor1.zip",
+      "Factor2.zip",
+      "Factor3.zip"
+    ],
+    "output": "C:\\Users\\javie\\OneDrive\\Desktop\\CampMob - Revisión - Experimento\\outputs\\figuras_tfg",
+    "expected_runs": 10,
+    "bounds": [
+      -16,
+      16
+    ],
+    "meters_per_unit": 21.39540387800133,
+    "legacy": false
+  }
+}

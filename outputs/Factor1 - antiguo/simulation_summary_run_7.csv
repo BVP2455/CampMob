@@ -1,0 +1,5 @@
+run_id,seed,demand_factor,start_slot,start_time,configured_duration_min,actual_end_time_s,run_status,run_time_limit_s,active_agents_total,pending_entries_total,mode,generated_agents_total,completed_trips,failed_paths_total,mean_duration_min,mean_speed_kmh,mean_distance_km,mean_congestion_min,mean_low_speed_min,mean_intermediate_speed_min,mean_high_speed_min,mean_copresence_car_percentage,mean_copresence_bike_percentage,mean_copresence_pedestrian_percentage
+7,21092032,1,38,09:30,15,1304.6,completed,4500,0,0,all,139,139,0,2.662062,8.923699,0.30147,0.026667,0.120024,0.462926,2.052446,0.106145,0.22026,0.661046
+7,21092032,1,38,09:30,15,1304.6,completed,4500,0,0,car,139,36,0,1.247593,17.497815,0.357069,0.003889,0.199537,1.0275,0.016667,0,0,0.141258
+7,21092032,1,38,09:30,15,1304.6,completed,4500,0,0,bike,139,17,0,1.379412,10.679232,0.246175,0.007255,0.550392,0.339608,0.482157,0,0,1.761774
+7,21092032,1,38,09:30,15,1304.6,completed,4500,0,0,pedestrian,139,86,0,3.507713,4.987509,0.289127,0.040039,0.001667,0.250969,3.215039,0.127127,0.312463,0
