@@ -1,383 +1,99 @@
-# Rangueil Campus Mobility Simulation
+# CampMob — Rangueil Campus Mobility Simulation
 
-## 1. Overview
+NetLogo model developed for a Software Engineering bachelor's thesis at the University of Seville, following a research internship at IRIT, Toulouse. It combines GIS networks and observed 15-minute mobility counts to simulate **cars, bicycles and pedestrians** on the Rangueil campus.
 
-This NetLogo model simulates multimodal mobility on the Rangueil campus using GIS transport networks and observed 15-minute inflow/outflow data.
+The model supports random traffic generation and a mode driven by observed flows. It exports trip indicators, multimodal encounters and spatial heatmaps for analysis in Python.
 
-The main operational mode is the **real-flow simulation**, which currently creates:
+## Main features
 
-- Cars
-- Bicycles
-- Pedestrians
+- Directed GIS graph with transport-mode permissions.
+- Custom Dijkstra routing weighted by edge length, with cached zone-to-zone routes.
+- Scheduled trip generation from observed inflow/outflow counts.
+- Simplified following, safety-distance, intersection and roundabout rules.
+- Travel-time, speed, distance and stopped-time indicators.
+- Multimodal copresence, encounter detection and encounter-start heatmaps.
+- Repeated experiments, CSV exports and Python figures.
 
-The model also includes general support for buses in the random traffic mode.
+## Data and scripts
 
-Main features:
+| Component | Purpose |
+| --- | --- |
+| NetLogo model file | Interface, network construction, simulation and exports |
+| `data/10731/` | GIS layers and source flow GeoJSON |
+| `preprocess_flow_geojson.py` | Conversion of GeoJSON flow profiles into CSV |
+| `dataNetlogo/flow_counts.csv` | Mobility counts read by the model |
+| `outputs/` | Results exported by simulation runs |
+| `boxplots_netlogo.py` | Post-processing and statistical visualisation |
 
-- Directed multimodal transport graph
-- Weighted shortest-path routing
-- Real-flow trip generation
-- Simplified traffic interactions
-- Trip, congestion and speed indicators
-- Multimodal copresence analysis
-- Multimodal encounter detection
-- Encounter heatmap
-- Repeated simulation runs
-- CSV and PNG exports
-- External box-plot generation with Python
+Keep GIS datasets together with their companion files and preserve the relative directory structure. Flow records describe a time slot, zone, mode, direction and count. They are aggregate observations, not individual trajectories or an observed origin–destination matrix.
 
-## 2. Project Structure
+## Running the model
 
-```text
-project-folder/
-│
-├── campus_model.nlogo
-├── data/
-│   └── 10731/
-│       ├── buildings_gross.shp
-│       ├── Roads_gross.shp
-│       ├── zone.shp
-│       ├── Netlogo_nodes.shp
-│       ├── osmRoads.shp
-│       └── In_Out_15min.geojson
-│
-├── dataNetlogo/
-│   └── flow_counts.csv
-│
-├── outputs/
-│
-└── boxplots_netlogo.py
-```
+Use NetLogo to open the model and Python for data preparation and analysis. Keep the data folders beside the model and ensure that `outputs/` exists.
 
-The `outputs` folder must exist before running the model.
+1. Open the NetLogo model.
+2. Check that the GIS files and `dataNetlogo/flow_counts.csv` are available. If regenerating the CSV, check the input and output paths in `preprocess_flow_geojson.py` first.
+3. Select a flow slot with available observations and set the demand duration.
+4. Run `setup-real-flow-simulation` to load the network and counts, prepare compatible routes and schedule trips.
+5. Check that trips have been scheduled, then run `go-real-flow` using the model's execution control.
+6. Inspect the exported results. Use `run-multiple-simulations` for repeated runs, with the repetition count set through `number-of-runs`.
 
-## 3. Data and Transport Network
-
-The model loads GIS files from:
-
-```text
-data/10731/
-```
-
-These datasets define:
-
-- Buildings
-- Campus zones
-- Graph nodes
-- Road geometries
-- Flow-zone locations
-
-Observed mobility flows are read from:
-
-```text
-dataNetlogo/flow_counts.csv
-```
-
-Each row contains:
-
-- 15-minute slot
-- Zone
-- Transport mode
-- Direction (`inflow` / `outflow`)
-- Number of agents
-
-The real-flow mode currently uses:
-
-```text
-car
-bike
-pedestrian
-```
-
-The GIS network is converted into a directed graph formed by `nodes`, `waypoints` and directed `edges`. Each edge stores its length and the transport modes that can use it.
-
-## 4. Routing
-
-The model uses a custom weighted Dijkstra implementation:
+For the demand window used in the thesis:
 
 ```netlogo
-shortest-path
+set selected-flow-slot 38
+set simulation-duration-minutes 15
 ```
 
-Routes are calculated using:
+These two settings select the window; the remaining experimental parameters are listed below. A simulation continues beyond the demand window until scheduled and active trips have finished. Trip duration is measured from actual agent creation to arrival, so it differs from total simulation duration.
 
-```text
-road-length
-```
+## Thesis experiments
 
-as edge weight and are filtered according to the agent transport mode.
+The final study compares three demand levels while keeping the network and other model settings fixed.
 
-The model does **not** currently use the NetLogo `nw` extension.
+| Parameter | Value |
+| --- | --- |
+| Flow slot | 38, corresponding to 09:30–09:45 |
+| Demand duration | 15 minutes |
+| Demand multipliers | 1, 2 and 3 |
+| Scheduled trips per run | 139, 278 and 417, respectively |
+| Repetitions | 10 per scenario; 30 runs in total |
+| Random seeds | 21092026–21092035, reused across scenarios |
+| Maximum active agents | 500 |
+| Reference speeds | Cars: 18 km/h; bicycles: 15 km/h; pedestrians: 5 km/h |
+| Time step | 0.2 seconds |
+| Initial state | Empty network |
 
-For real-flow simulations, required zone-to-zone routes are precomputed and stored in:
+The thesis reports the final experimental batch. Preliminary runs were used during development and should not be mixed with the final results.
 
-```netlogo
-real-route-cache
-```
+To repeat the study, use the same model version, datasets, seeds and settings. Keep each demand scenario's exports separate and retain its configuration alongside the files. Shared seeds identify corresponding repetitions but do not guarantee identical individual trips when demand changes.
 
-This avoids recalculating shortest paths for every agent during the simulation.
+Use `boxplots_netlogo.py` for post-processing, checking its input paths and options against the location of the scenario results. Analyse variability across runs; pooled trip distributions and distributions of run-level means answer different questions.
 
-## 5. Real-Flow Simulation
+## Outputs and interpretation
 
-Initialise a real-flow simulation with:
+| Output | Contents |
+| --- | --- |
+| `trip_results_run_X.csv` | One record per completed trip |
+| `simulation_summary_run_X.csv` | Global and per-mode indicators |
+| `encounters_run_X.csv` | Completed multimodal encounter episodes |
+| `encounter_heatmap_run_X.png` | Spatial distribution of encounter starts |
 
-```netlogo
-setup-real-flow-simulation
-```
+Simulation exports are written under `outputs/`.
 
-The procedure:
+**Copresence** measures the percentage of trip time spent near agents of another mode. Distance thresholds depend on the observing agent: 5 m for cars, 3 m for bicycles and 2 m for pedestrians.
 
-1. Loads the GIS network
-2. Loads the flow zones
-3. Assigns compatible graph points to each zone
-4. Loads flow counts
-5. Selects the requested 15-minute slots
-6. Precomputes required routes
-7. Creates the scheduled trip list
+**Encounters** are episodes between agents of different modes within 5 m. They are proximity events, not collisions or direct measures of accident risk.
 
-The starting flow slot is controlled by:
+**Heatmaps** count where encounter episodes begin. They represent encounter-start concentration, not occupancy or traffic density. Exported encounter coordinates use the NetLogo coordinate system. For comparisons between scenarios, use consistent spatial bounds, colour scales and aggregation across repetitions.
 
-```text
-selected-flow-slot
-```
+## Scope and limitations
 
-and the duration by:
+The experiments assess internal model behaviour under controlled changes in demand. They use one observed time window, start from an empty network and apply simplified destination-assignment and movement rules. The available counts do not independently validate simulated travel times, speeds or encounters, so the results are not predictions of real campus mobility.
 
-```text
-simulation-duration-minutes
-```
+Network connectivity and mode permissions constrain feasible routes. Check route and trip-completion diagnostics when changing the data or configuration. Results for modes represented by few trips require particular care.
 
-The duration should normally be selected in multiples of 15 minutes.
+## Author
 
-A useful test configuration is:
+Francisco Javier Martos Romero - Software Engineering bachelor's thesis, University of Seville, 2026.
 
-```text
-selected-flow-slot = 48
-simulation-duration-minutes = 15
-```
-
-Run the simulation with:
-
-```netlogo
-go-real-flow
-```
-
-The simulation finishes after the configured flow period has ended and all scheduled and active agents have completed their trips.
-
-## 6. Agent Movement
-
-Agents move through the directed graph following their precomputed route.
-
-The movement model includes simplified:
-
-- Same-segment following
-- Safety distance
-- Intersection priority
-- Roundabout priority
-- Deadlock release
-
-Speeds are specified in km/h and converted to NetLogo units per tick.
-
-Important time and scale values include:
-
-```netlogo
-seconds-per-tick
-meters-per-netlogo-unit
-movement-step-size
-```
-
-Each agent also receives an individual speed factor from a bounded normal distribution.
-
-## 7. Metrics
-
-When an agent reaches its destination, the model stores:
-
-- Transport mode
-- Trajectory duration
-- Average speed
-- Travelled distance
-- Congestion duration
-- Low-speed duration
-- Intermediate-speed duration
-- High-speed duration
-- Copresence percentages
-- Origin zone
-- Destination zone
-- Flow slot
-- Scheduled spawn time
-- Arrival time
-
-Trajectory duration is measured from the moment the agent is actually created in the simulation until it reaches its destination.
-
-## 8. Copresence and Encounters
-
-### Copresence
-
-Copresence measures the percentage of trip time spent near agents of a **different transport mode**.
-
-Same-mode copresence is not counted.
-
-Current distance thresholds are:
-
-```text
-Car:        5 m
-Bicycle:    3 m
-Pedestrian: 2 m
-```
-
-### Encounters
-
-Encounter events are recorded separately.
-
-An encounter is created when two agents of **different modes** are within:
-
-```text
-5 m
-```
-
-Each encounter stores:
-
-- Agent IDs and modes
-- Start and end time
-- Duration
-- Start and end midpoint
-- Minimum distance
-
-Encounter data are stored in `completed-encounters` and exported at the end of each run.
-
-## 9. Encounter Heatmap
-
-The model includes a dynamic heatmap based on multimodal encounter locations.
-
-Each patch stores the number of encounter events that started on it:
-
-```netlogo
-encounter-count
-```
-
-The heatmap is controlled with:
-
-```text
-show-encounter-heatmap?
-```
-
-Hotter areas represent locations where more multimodal encounters occurred.
-
-The final heatmap can be exported as:
-
-```text
-outputs/encounter_heatmap_run_X.png
-```
-
-The heatmap is intended as a visual analysis tool. Quantitative encounter analysis should be based on the exported CSV data.
-
-## 10. Multiple Runs and Box Plots
-
-Repeated simulations can be executed using:
-
-```netlogo
-run-multiple-simulations
-```
-
-The number of repetitions is controlled by:
-
-```text
-number-of-runs
-```
-
-Each run starts from a fresh simulation state and exports its own results.
-
-The Python script:
-
-```text
-boxplots_netlogo.py
-```
-
-reads the exported `trip_results_run_*.csv` files and generates box plots for:
-
-- Trajectory duration
-- Average speed
-- Travelled distance
-- Congestion
-- Copresence
-
-The script can be used to compare transport modes and repeated simulation runs.
-
-## 11. Outputs
-
-Each run can generate:
-
-### Trip results
-
-```text
-outputs/trip_results_run_X.csv
-```
-
-One row per completed trip.
-
-### Simulation summary
-
-```text
-outputs/simulation_summary_run_X.csv
-```
-
-Summary values for:
-
-```text
-all
-car
-bike
-pedestrian
-```
-
-### Encounter events
-
-```text
-outputs/encounters_run_X.csv
-```
-
-One row per completed multimodal encounter.
-
-### Encounter heatmap
-
-```text
-outputs/encounter_heatmap_run_X.png
-```
-
-Final visual representation of encounter concentration.
-
-The run identifier is selected automatically using the next available output number.
-
-## 12. Current Limitations
-
-The main current limitations are:
-
-- The custom Dijkstra implementation does not use a priority queue and may be slower than the NetLogo `nw` extension.
-- Some origin/mode combinations may fail to obtain a valid cached route and are counted as `failed_paths`.
-- Encounter coordinates are exported as NetLogo `xcor` / `ycor`, not original GIS coordinates.
-- Copresence and encounter detection use different distance thresholds.
-- Buses are not currently generated in the real-flow mode.
-- Traffic rules are simplified and do not represent a full microscopic traffic model.
-- The full GIS graph is rebuilt before every batch run, increasing computation time.
-- Results for modes with very few agents should be interpreted carefully.
-
-## 13. Quick Start
-
-Recommended sequence:
-
-```text
-1. Open the NetLogo model
-2. Confirm that the data folders and outputs folder exist
-3. Select an active flow slot
-4. Set the simulation duration
-5. Run setup-real-flow-simulation
-6. Check that precomputed trips are greater than zero
-7. Run go-real-flow
-8. Review the exported CSV and heatmap files
-9. Use run-multiple-simulations for repeated experiments
-10. Run boxplots_netlogo.py for post-processing
-```
-
-## 14. Model Summary
-
-The model converts the Rangueil campus GIS network into a directed multimodal graph and uses observed 15-minute inflow/outflow data to generate scheduled trips. Agents follow weighted shortest paths compatible with their transport mode, interact through simplified mobility rules, and produce trip, congestion, copresence and encounter indicators. Results can be exported for repeated statistical analysis and spatial visualisation.
