@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <model version="NetLogo 7.0.4" snapToGrid="true">
-  <code><![CDATA[extensions [ gis ]
+  <code><![CDATA[extensions [ gis csv ]
 
 globals 
 [ 
+  scale-dataset
   buildings
   roads
   zones
-  busway
   footway
   motorway
   pedestrianway
@@ -40,16 +40,47 @@ globals
   
   route-pool
   route-pool-target-size
+  
+  flow-zones-dataset
+  flow-zone-radius
+  flow-counts
+  scheduled-trips
+  outflow-usage
+  flow-slot-duration-seconds
+  real-route-cache
+  completed-trip-metrics
+  copresence-distance-car-m
+  copresence-distance-bike-m
+  copresence-distance-pedestrian-m
+  last-plot-signature
+  run-id
+  results-exported?
+  
+  encounter-distance-m
+  active-encounters
+  completed-encounters
+  next-encounter-id
+  bike-walking-distance-total-m
+  run-seed
+  run-time-limit-seconds
+  run-demand-factor
+  gis-endpoint-audit
+  gis-created-endpoint-nodes
+  gis-max-endpoint-offset-m
 ]
 
 breed [ vehicles vehicle ]
 breed [ pedestrians pedestrian ]
 breed [ bicycles bicycle ]
-breed [ buses bus ]
 
 breed [ nodes node ]
 breed [ waypoints waypoint ]
 directed-link-breed [ edges edge ]
+breed [ flow-zones flow-zone ]
+
+patches-own [
+  encounter-count
+]
 
 nodes-own [
   node-id
@@ -70,6 +101,20 @@ waypoints-own [
   visited?
 ]
 
+flow-zones-own [
+  zone-id
+  zone-radius
+
+  pedestrian-in-nodes
+  pedestrian-out-nodes
+
+  bike-in-nodes
+  bike-out-nodes
+
+  car-in-nodes
+  car-out-nodes
+]
+
 edges-own [
   road-type
   road-length
@@ -79,6 +124,7 @@ edges-own [
 ]
 
 turtles-own [
+  bike-route-walk-cost
   current-node
   next-node
   previous-node
@@ -88,21 +134,53 @@ turtles-own [
   speed-factor
   arrived?
   stopped?
+  roundabout-inside?
   agent-mode
   waiting-time
+  origin-zone-id
+  destination-zone-id
+  scheduled-spawn-time
+  flow-slot-id
+  trip-start-time
+  trip-distance-m
+  total-congestion-time
+  distance-moved-this-tick
+  low-speed-time
+  intermediate-speed-time
+  high-speed-time
+  copresence-time-car
+  copresence-time-bike
+  copresence-time-pedestrian
 ]
 
 vehicles-own [
-]
-
-buses-own [
 ]
 
 bicycles-own [
 ]
 
 to setup
+  let requested-seed experiment-seed
+  
+  let requested-demand-factor demand-factor
+
+  if not member? requested-demand-factor [1 2 3] [
+    error "El factor de demanda debe ser 1, 2 o 3."
+  ]
+
+  if requested-seed != floor requested-seed or
+     requested-seed < 0 or
+     requested-seed > 2147483647 [
+    error "La semilla debe ser un entero entre 0 y 2147483647."
+  ]
+
   clear-all
+
+  set run-demand-factor requested-demand-factor
+  set run-seed requested-seed
+  random-seed run-seed
+
+  show (word "Simulation seed: " run-seed)
   
   set origin-point nobody
   set destination-point nobody
@@ -110,15 +188,17 @@ to setup
 
   set sim-time-seconds 0
   set seconds-per-tick 0.2
-  set meters-per-netlogo-unit 5
+  set meters-per-netlogo-unit 21.39540387800133
   
   set vehicle-safety-distance 0.12
   set intersection-safety-distance 0.10
   set movement-step-size 0.03
   
   set simulation-duration-seconds simulation-duration-minutes * 60
+  set run-time-limit-seconds simulation-duration-seconds + 3600
   set last-vehicle-generation-time (- vehicle-generation-interval-seconds)
   set generated-vehicles 0
+  set bike-walking-distance-total-m 0
   set completed-trips 0
   set failed-paths 0
   
@@ -129,6 +209,29 @@ to setup
   set route-pool []
   set route-pool-target-size 25
   
+  set flow-zone-radius 0.35
+  set flow-counts []
+  set scheduled-trips []
+  set outflow-usage []
+  set flow-slot-duration-seconds 900
+  set real-route-cache []
+  set completed-trip-metrics []
+  
+  set copresence-distance-car-m 5
+  set copresence-distance-bike-m 3
+  set copresence-distance-pedestrian-m 2
+  set last-plot-signature ""
+  set run-id next-available-run-id
+  set results-exported? false
+  set encounter-distance-m 5
+  set active-encounters []
+  set completed-encounters []
+  set next-encounter-id 1
+  
+  ask patches [
+    set encounter-count 0
+  ]
+  
   load-gis
   draw-gis
   load-graph-from-shp
@@ -136,24 +239,25 @@ to setup
 end
 
 to load-gis
-  set buildings gis:load-dataset "data/Gross_data/Buildings_gross.shp"
-  set roads gis:load-dataset "data/Gross_data/Roads_gross.shp"
-  set zones gis:load-dataset "data/Gross_data/zone.shp"
-
-  set nodes-dataset gis:load-dataset "dataNetlogo/Netlogo_nodes.shp"
-  set edges-dataset gis:load-dataset "dataNetlogo/ultimo_roads.shp"
+  set buildings gis:load-dataset "data/10731/buildings_gross.shp"
+  set roads gis:load-dataset "data/10731/Roads_gross.shp"
+  set zones gis:load-dataset "data/10731/zone.shp"
+  set nodes-dataset gis:load-dataset "data/10731/Netlogo_nodes.shp"
+  set edges-dataset gis:load-dataset "data/10731/osmRoads.shp"
 
   gis:set-world-envelope
-  (gis:envelope-union-of
-    (gis:envelope-of zones)
-    (gis:envelope-of nodes-dataset)
-    (gis:envelope-of edges-dataset))
+    (gis:envelope-union-of
+      (gis:envelope-of zones)
+      (gis:envelope-of nodes-dataset)
+      (gis:envelope-of edges-dataset)
+    )
 end
 
 to draw-gis
   ask patches [
     set pcolor white
   ]
+  
 
   gis:set-drawing-color green
   gis:draw zones 5
@@ -167,14 +271,24 @@ to draw-gis
 end
 
 to load-graph-from-shp
+  set gis-created-endpoint-nodes 0
+  set gis-max-endpoint-offset-m 0
+
   load-nodes
   load-full-edges-by-geometry
   create-turn-connectors
   identify-traffic-nodes
+
+  show (word
+    "GRAFO | nodos de extremo añadidos: "
+    gis-created-endpoint-nodes
+    " | desplazamiento maximo de extremos m: "
+    precision gis-max-endpoint-offset-m 6
+  )
 end
 
 to-report mobile-agents
-  report (turtle-set vehicles buses bicycles pedestrians)
+  report (turtle-set vehicles bicycles pedestrians)
 end
 
 to setup-mobile-agent [mode origin destination new-path]
@@ -189,12 +303,45 @@ to setup-mobile-agent [mode origin destination new-path]
   set speed kmh-to-netlogo-speed (speed-kmh-from-mode mode * speed-factor)
   set stopped? false
   set arrived? false
+  set roundabout-inside? false
   set waiting-time 0
+  set origin-zone-id ""
+  set destination-zone-id ""
+  set scheduled-spawn-time -1
+  set flow-slot-id -1
+  set trip-start-time sim-time-seconds
+  set trip-distance-m 0
+  set total-congestion-time 0
+  set distance-moved-this-tick 0
+  set low-speed-time 0
+  set intermediate-speed-time 0
+  set high-speed-time 0
+  set copresence-time-car 0
+  set copresence-time-bike 0
+  set copresence-time-pedestrian 0
+end
+
+to-report next-available-run-id
+  let candidate 1
+
+  while [
+    file-exists?
+      (word "outputs/trip_results_run_" candidate ".csv")
+    or
+    file-exists?
+      (word "outputs/simulation_summary_run_" candidate ".csv")
+    or
+    file-exists?
+      (word "outputs/encounters_run_" candidate ".csv")
+  ] [
+    set candidate candidate + 1
+  ]
+
+  report candidate
 end
 
 to-report speed-kmh-from-mode [mode]
   if mode = "car" [ report vehicle-speed-kmh ]
-  if mode = "bus" [ report 20 ]
   if mode = "bike" [ report 15 ]
   if mode = "pedestrian" [ report 5 ]
   report vehicle-speed-kmh
@@ -206,16 +353,6 @@ to create-mobile-agent [mode origin destination new-path]
       set color yellow
       set size 0.5
       set shape "car"
-      setup-mobile-agent mode origin destination new-path
-    ]
-    stop
-  ]
-
-  if mode = "bus" [
-    create-buses 1 [
-      set color blue
-      set size 0.8
-      set shape "bus"
       setup-mobile-agent mode origin destination new-path
     ]
     stop
@@ -243,22 +380,48 @@ to create-mobile-agent [mode origin destination new-path]
 end
 
 to identify-traffic-nodes
-  ask nodes [
-    let real-in count my-in-edges with [road-type != "turn"]
-    let real-out count my-out-edges with [road-type != "turn"]
+  let junction-keys
+    sort (remove-duplicates [node-key] of nodes)
 
-    set intersection? (real-in + real-out >= 3)
-
-    set roundabout-node?
-      ((any? my-in-edges with [roundabout?]) or
-       (any? my-out-edges with [roundabout?]))
-
-    if intersection? [
-      set size 0.11
+  foreach junction-keys [junction-key ->
+    let junction-nodes nodes with [
+      node-key = junction-key
     ]
 
-    if roundabout-node? [
-      set size 0.13
+    let incoming no-links
+    let outgoing no-links
+
+    foreach sort junction-nodes [junction-node ->
+      set incoming
+        (link-set incoming ([my-in-edges] of junction-node))
+
+      set outgoing
+        (link-set outgoing ([my-out-edges] of junction-node))
+    ]
+
+    set incoming incoming with [road-type != "turn"]
+    set outgoing outgoing with [road-type != "turn"]
+
+    let junction-intersection?
+      ((count incoming + count outgoing) >= 3)
+
+    let junction-roundabout?
+      ((any? incoming with [roundabout?]) or
+       (any? outgoing with [roundabout?]))
+
+    ask junction-nodes [
+      set intersection? junction-intersection?
+      set roundabout-node? junction-roundabout?
+
+      set size 0.08
+
+      if intersection? [
+        set size 0.11
+      ]
+
+      if roundabout-node? [
+        set size 0.13
+      ]
     ]
   ]
 end
@@ -322,6 +485,7 @@ to load-full-edges-by-geometry
         ]
       ]
 
+      set loc-list remove-consecutive-duplicate-locations loc-list
       if length loc-list >= 2 [
 
         ifelse round-value = "true" [
@@ -379,7 +543,28 @@ end
 
 to connect-graph-agents [a b link-type current-road-id mode]
 
+  if a = nobody or b = nobody [
+    stop
+  ]
+
+  if a = b [
+    show (word
+      "Skipped self-link in road " current-road-id
+      " | agent: " a
+      " | type: " link-type
+    )
+    stop
+  ]
+
   let d [distance b] of a
+
+  if d <= 0.000001 [
+    show (word
+      "Skipped zero-length edge in road " current-road-id
+      " | distance: " d
+    )
+    stop
+  ]
 
   ask a [
     if not out-link-neighbor? b [
@@ -394,6 +579,30 @@ to connect-graph-agents [a b link-type current-road-id mode]
       ]
     ]
   ]
+end
+
+to-report remove-consecutive-duplicate-locations [locations]
+  if empty? locations [
+    report []
+  ]
+
+  let cleaned (list first locations)
+  let previous-location first locations
+
+  foreach but-first locations [
+    current-location ->
+
+    let x (item 0 current-location) - (item 0 previous-location)
+    let y (item 1 current-location) - (item 1 previous-location)
+    let separation sqrt ((x * x) + (y * y))
+
+    if separation > 0.000001 [
+      set cleaned lput current-location cleaned
+      set previous-location current-location
+    ]
+  ]
+
+  report cleaned
 end
 
 to-report flatten-modes [mode-lists]
@@ -452,10 +661,19 @@ to-report allowed-modes-from-feature [feat]
   if empty? mode [
     set mode ["car"]
   ]
+  
+  if member? "bike" mode or
+     (category-value = "pedestrian" and
+      member? type-value ["footway" "path"]) [
+    set mode lput "bike-mixed" mode
+  ]
+
   report remove-duplicates mode
 end
 
 to-report edge-color-from-modes [mode]
+  
+  set mode remove "bike-mixed" mode
 
   if member? "bus" mode and not member? "car" mode and not member? "bike" mode and not member? "pedestrian" mode [
     report blue
@@ -547,22 +765,59 @@ end
 
 to-report node-at-location [loc lane-dir]
   let k coord-key loc
+  let location-x item 0 loc
+  let location-y item 1 loc
+
   let candidates nodes with [
-    node-key = k and lane-direction = lane-dir
+    node-key = k and
+    lane-direction = lane-dir
   ]
 
   if any? candidates [
-    report one-of candidates
+    let selected-node one-of candidates
+
+    let offset-m
+      ([distancexy location-x location-y] of selected-node) *
+      meters-per-netlogo-unit
+
+    set gis-max-endpoint-offset-m
+      max (list gis-max-endpoint-offset-m offset-m)
+
+    report selected-node
   ]
 
-  let x item 0 loc
-  let y item 1 loc
+  let new-node nobody
+  let new-node-id 0
 
-  let fallback min-one-of nodes with [lane-direction = lane-dir] [
-    distancexy x y
+  if any? nodes [
+    set new-node-id 1 + max [node-id] of nodes
   ]
 
-  report fallback
+  create-nodes 1 [
+    set node-id new-node-id
+    set node-key k
+    set lane-direction lane-dir
+
+    setxy location-x location-y
+
+    set color cyan
+    if lane-dir = "backward" [
+      set color blue
+    ]
+
+    set size 0.08
+    set shape "circle"
+
+    set intersection? false
+    set roundabout-node? false
+
+    set new-node self
+  ]
+
+  set gis-created-endpoint-nodes
+    gis-created-endpoint-nodes + 1
+
+  report new-node
 end
 
 to create.vehicles
@@ -582,6 +837,7 @@ to create.vehicles
     set size 0.5
     set shape "car"
     set agent-mode "car"
+    set roundabout-inside? false
 
     set current-node one-of valid-start-points
     move-to current-node
@@ -597,6 +853,312 @@ to create.vehicles
     set stopped? false
     set waiting-time 0
   ]
+end
+
+to update-speed-duration-times-core
+  ask mobile-agents [
+
+    let moved-meters
+      distance-moved-this-tick * meters-per-netlogo-unit
+
+    let actual-speed-kmh
+      (moved-meters / seconds-per-tick) * 3.6
+
+    ifelse actual-speed-kmh <= 0.0001 [
+      set total-congestion-time
+        total-congestion-time + seconds-per-tick
+    ]
+    [
+      let low-limit
+        low-speed-upper-limit agent-mode
+
+      let intermediate-limit
+        intermediate-speed-upper-limit agent-mode
+
+      ifelse actual-speed-kmh <= low-limit [
+        set low-speed-time
+          low-speed-time + seconds-per-tick
+      ]
+      [
+        ifelse actual-speed-kmh <= intermediate-limit [
+          set intermediate-speed-time
+            intermediate-speed-time + seconds-per-tick
+        ]
+        [
+          set high-speed-time
+            high-speed-time + seconds-per-tick
+        ]
+      ]
+    ]
+  ]
+end
+
+to update-copresence-times-core
+  ask mobile-agents [
+
+    let my-mode agent-mode
+
+    let car-radius
+      copresence-distance-car-m / meters-per-netlogo-unit
+
+    let bike-radius
+      copresence-distance-bike-m / meters-per-netlogo-unit
+
+    let pedestrian-radius
+      copresence-distance-pedestrian-m / meters-per-netlogo-unit
+
+    if my-mode != "car" [
+      if any? other mobile-agents with [
+        agent-mode = "car" and
+        distance myself <= car-radius
+      ] [
+        set copresence-time-car
+          copresence-time-car + seconds-per-tick
+      ]
+    ]
+
+    if my-mode != "bike" [
+      if any? other mobile-agents with [
+        agent-mode = "bike" and
+        distance myself <= bike-radius
+      ] [
+        set copresence-time-bike
+          copresence-time-bike + seconds-per-tick
+      ]
+    ]
+
+    if my-mode != "pedestrian" [
+      if any? other mobile-agents with [
+        agent-mode = "pedestrian" and
+        distance myself <= pedestrian-radius
+      ] [
+        set copresence-time-pedestrian
+          copresence-time-pedestrian + seconds-per-tick
+      ]
+    ]
+  ]
+end
+
+to update-encounters-core
+
+  let encounter-radius
+    encounter-distance-m / meters-per-netlogo-unit
+
+  ask mobile-agents [
+
+    let agent-1 self
+
+    ask other mobile-agents with [
+      who > [who] of agent-1 and
+      agent-mode != [agent-mode] of agent-1 and
+      distance agent-1 <= encounter-radius
+    ][
+
+      let agent-2 self
+
+      let agent-1-id [who] of agent-1
+      let agent-2-id [who] of agent-2
+
+      let current-distance-m
+        (distance agent-1) * meters-per-netlogo-unit
+
+      let midpoint-x
+        (([xcor] of agent-1 + [xcor] of agent-2) / 2)
+
+      let midpoint-y
+        (([ycor] of agent-1 + [ycor] of agent-2) / 2)
+
+      let existing-records filter [
+        record ->
+          item 1 record = agent-1-id and
+          item 3 record = agent-2-id
+      ] active-encounters
+
+      ifelse empty? existing-records [
+
+        let new-record
+        (list
+          next-encounter-id
+          agent-1-id
+          [agent-mode] of agent-1
+          agent-2-id
+          [agent-mode] of agent-2
+          sim-time-seconds
+          sim-time-seconds
+          midpoint-x
+          midpoint-y
+          midpoint-x
+          midpoint-y
+          current-distance-m
+        )
+
+        set active-encounters
+        lput new-record active-encounters
+        
+        register-encounter-on-heatmap midpoint-x midpoint-y
+
+        set next-encounter-id next-encounter-id + 1
+      ]
+      [
+        let old-record first existing-records
+        let record-position
+          position old-record active-encounters
+
+        let updated-record
+          replace-item 6 old-record sim-time-seconds
+
+        set updated-record
+          replace-item 9 updated-record midpoint-x
+
+        set updated-record
+          replace-item 10 updated-record midpoint-y
+
+        if current-distance-m < item 11 updated-record [
+          set updated-record
+            replace-item 11 updated-record current-distance-m
+        ]
+
+        set active-encounters
+          replace-item
+            record-position
+            active-encounters
+            updated-record
+      ]
+    ]
+  ]
+
+  close-stale-encounters
+end
+
+to register-encounter-on-heatmap [x y]
+
+  let encounter-patch patch x y
+
+  if encounter-patch != nobody [
+    ask encounter-patch [
+      set encounter-count encounter-count + 1
+    ]
+  ]
+
+end
+
+to update-encounter-heatmap-core
+
+  if not show-encounter-heatmap? [
+    ask patches [
+      set pcolor white
+    ]
+    stop
+  ]
+
+  let max-heatmap-count 20
+
+  ask patches [
+
+    ifelse encounter-count = 0 [
+      set pcolor white
+    ]
+    [
+      let limited-count
+        min (list encounter-count max-heatmap-count)
+
+      set pcolor
+        scale-color red
+          limited-count
+          max-heatmap-count
+          0
+    ]
+  ]
+
+end
+
+to close-stale-encounters
+
+  let still-active []
+
+  foreach active-encounters [
+    record ->
+
+    ifelse
+      item 6 record <
+      (sim-time-seconds - seconds-per-tick / 2)
+    [
+      complete-encounter
+        record
+        (item 6 record + seconds-per-tick)
+    ]
+    [
+      set still-active
+        lput record still-active
+    ]
+  ]
+
+  set active-encounters still-active
+end
+
+to close-encounters-for-agent [departing-agent-id]
+  let still-active []
+
+  foreach active-encounters [record ->
+    ifelse
+      item 1 record = departing-agent-id or
+      item 3 record = departing-agent-id
+    [
+      complete-encounter record sim-time-seconds
+    ]
+    [
+      set still-active lput record still-active
+    ]
+  ]
+
+  set active-encounters still-active
+end
+
+to close-all-active-encounters
+
+  foreach active-encounters [
+    record ->
+      complete-encounter record sim-time-seconds
+  ]
+
+  set active-encounters []
+end
+
+
+to complete-encounter [active-record encounter-end-time]
+
+  let encounter-start-time
+    item 5 active-record
+
+  let safe-end-time
+    max
+      (list
+        encounter-end-time
+        (encounter-start-time + seconds-per-tick)
+      )
+
+  let encounter-duration
+    safe-end-time - encounter-start-time
+
+  let completed-record
+    (list
+      item 0 active-record
+      item 1 active-record
+      item 2 active-record
+      item 3 active-record
+      item 4 active-record
+      encounter-start-time
+      safe-end-time
+      encounter-duration
+      item 7 active-record
+      item 8 active-record
+      item 9 active-record
+      item 10 active-record
+      item 11 active-record
+    )
+
+  set completed-encounters
+    lput completed-record completed-encounters
 end
 
 to-report vehicle-ahead-on-same-segment? [target]
@@ -638,56 +1200,241 @@ to-report vehicle-ahead-on-same-segment [target]
 end
 
 to-report adjusted-step-distance [desired-step target]
+  let front-agent vehicle-ahead-on-same-segment target
 
-  let front-car vehicle-ahead-on-same-segment target
-
-  if front-car = nobody [
+  if front-agent = nobody [
     report desired-step
   ]
 
-  let gap distance front-car
+  let available-distance
+    (distance front-agent) - vehicle-safety-distance
 
-  if gap < vehicle-safety-distance [
+  if available-distance <= 0.000000001 [
     report 0
   ]
 
-  let front-speed [speed] of front-car
-
-  report min (list desired-step front-speed)
+  report min (list desired-step available-distance)
 end
 
 to vehicle-arrive
+
   if destination-node != nobody [
     move-to destination-node
     set current-node destination-node
   ]
 
+  let duration-seconds sim-time-seconds - trip-start-time
+
+  if duration-seconds > 0 [
+    let duration-min duration-seconds / 60
+    let distance-km trip-distance-m / 1000
+    let average-speed-kmh distance-km / (duration-seconds / 3600)
+    let congestion-min total-congestion-time / 60
+    let low-speed-min low-speed-time / 60
+    let intermediate-speed-min intermediate-speed-time / 60
+    let high-speed-min high-speed-time / 60
+    let copresence-car-ratio copresence-time-car / duration-seconds
+    let copresence-bike-ratio copresence-time-bike / duration-seconds
+    let copresence-pedestrian-ratio copresence-time-pedestrian / duration-seconds
+
+    set completed-trip-metrics lput
+      (list
+        agent-mode
+        duration-min
+        average-speed-kmh
+        distance-km
+        congestion-min
+        low-speed-min
+        intermediate-speed-min
+        high-speed-min
+        copresence-car-ratio
+        copresence-bike-ratio
+        copresence-pedestrian-ratio
+        origin-zone-id
+        destination-zone-id
+        flow-slot-id
+        scheduled-spawn-time
+        sim-time-seconds
+      )
+      completed-trip-metrics
+  ]
+
   set completed-trips completed-trips + 1
+  close-encounters-for-agent who
   die
 end
 
+to-report average-congestion-duration-min [transport-mode]
+  let records
+    completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [
+    r -> item 4 r
+  ] records
+end
+
+to-report average-low-speed-duration-min [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [r -> item 5 r] records
+end
+
+to-report average-intermediate-speed-duration-min [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [r -> item 6 r] records
+end
+
+to-report average-high-speed-duration-min [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [r -> item 7 r] records
+end
+
+to-report average-copresence-car-percentage [transport-mode]
+
+  let records completed-trip-records-by-mode transport-mode
+
+  set records filter [
+    r -> item 0 r != "car"
+  ] records
+
+  if empty? records [
+    report 0
+  ]
+
+  report 100 * mean map [
+    r -> item 8 r
+  ] records
+end
+
+to-report average-copresence-bike-percentage [transport-mode]
+
+  let records completed-trip-records-by-mode transport-mode
+
+  set records filter [
+    r -> item 0 r != "bike"
+  ] records
+
+  if empty? records [
+    report 0
+  ]
+
+  report 100 * mean map [
+    r -> item 9 r
+  ] records
+end
+
+to-report average-copresence-pedestrian-percentage [transport-mode]
+
+  let records completed-trip-records-by-mode transport-mode
+
+  set records filter [
+    r -> item 0 r != "pedestrian"
+  ] records
+
+  if empty? records [
+    report 0
+  ]
+
+  report 100 * mean map [
+    r -> item 10 r
+  ] records
+end
+
+to-report classified-duration-total-min [transport-mode]
+  report
+    average-congestion-duration-min transport-mode +
+    average-low-speed-duration-min transport-mode +
+    average-intermediate-speed-duration-min transport-mode +
+    average-high-speed-duration-min transport-mode
+end
+
 to-report position-blocked? [move-distance]
+  let front-agent vehicle-ahead-on-same-segment next-node
 
-  let front-car vehicle-ahead-on-same-segment next-node
-
-  if front-car = nobody [
+  if front-agent = nobody [
     report false
   ]
 
-  report distance front-car < vehicle-safety-distance
+  let available-distance
+    max (list
+      0
+      ((distance front-agent) - vehicle-safety-distance)
+    )
+
+  report move-distance > available-distance + 0.000000001
 end
 
 to-report on-roundabout?
-  if current-node = nobody or next-node = nobody [
-    report false
+  report roundabout-inside? = true
+end
+
+to-report roundabout-entry-point [target]
+  if current-node = nobody or target = nobody [
+    report nobody
   ]
 
-  let c current-node
-  let n next-node
+  let origin current-node
+  let first-edge one-of [my-out-edges with [
+    end2 = target
+  ]] of origin
 
-  report any? edges with [
-    roundabout? and end1 = c and end2 = n
+  if first-edge = nobody [
+    report nobody
   ]
+
+  if [roundabout?] of first-edge [
+    report origin
+  ]
+
+  let cursor target
+  let remaining-path path
+
+  if not is-list? remaining-path [
+    report nobody
+  ]
+
+  while [not empty? remaining-path] [
+    let following-point first remaining-path
+    set remaining-path but-first remaining-path
+
+    let route-edge one-of [my-out-edges with [
+      end2 = following-point
+    ]] of cursor
+
+    if route-edge = nobody [
+      report nobody
+    ]
+
+    if [roundabout?] of route-edge [
+      report cursor
+    ]
+
+    if [road-type] of route-edge != "turn" [
+      report nobody
+    ]
+
+    set cursor following-point
+  ]
+
+  report nobody
 end
 
 to-report next-edge-roundabout? [target]
@@ -705,12 +1452,7 @@ to-report next-edge-roundabout? [target]
 end
 
 to-report roundabout-entry-blocked? [target]
-
   if waiting-time >= deadlock-release-time [
-    report false
-  ]
-
-  if not next-edge-roundabout? target [
     report false
   ]
 
@@ -718,13 +1460,38 @@ to-report roundabout-entry-blocked? [target]
     report false
   ]
 
+  let entry-point roundabout-entry-point target
+
+  if entry-point = nobody [
+    report false
+  ]
+
+  if distance entry-point > roundabout-priority-radius [
+    report false
+  ]
+
   report any? other mobile-agents with [
     not arrived? and
     on-roundabout? and
-    (
-      next-node = target or
-      distance target < roundabout-priority-radius
-    )
+    distance entry-point < roundabout-priority-radius
+  ]
+end
+
+to update-roundabout-state-after-move
+  if current-node = nobody or next-node = nobody [
+    stop
+  ]
+
+  let target next-node
+
+  let traversed-edge one-of [my-out-edges with [
+    end2 = target
+  ]] of current-node
+
+  if traversed-edge != nobody [
+    if [road-type] of traversed-edge != "turn" [
+      set roundabout-inside? [roundabout?] of traversed-edge
+    ]
   ]
 end
 
@@ -748,30 +1515,54 @@ to-report has-priority-over-me? [other-car target]
 end
 
 to-report vehicle-from-right-near? [target]
+  if target = nobody [
+    report false
+  ]
+
+  if [breed] of target != nodes [
+    report false
+  ]
+
+  if distance target > right-priority-radius [
+    report false
+  ]
+
+  let junction-key [node-key] of target
+
+  let equivalent-targets nodes with [
+    node-key = junction-key
+  ]
 
   let my-x xcor
   let my-y ycor
-  let my-heading heading
-  let right-heading (my-heading + 90) mod 360
+  let right-heading (heading + 90) mod 360
 
   let blockers other mobile-agents with [
     not arrived? and
-    next-node = target and
-    distance target < right-priority-radius and
-    (abs (subtract-headings
-      (atan (xcor - my-x) (ycor - my-y))
-      right-heading)) < 70
+    next-node != nobody
   ]
 
-  if not any? blockers [
-    report false
+  set blockers blockers with [
+    member? next-node equivalent-targets and
+    distance target < right-priority-radius
+  ]
+
+  set blockers blockers with [
+    xcor != my-x or ycor != my-y
+  ]
+
+  set blockers blockers with [
+    abs (
+      subtract-headings
+        (atan (xcor - my-x) (ycor - my-y))
+        right-heading
+    ) < 70
   ]
 
   let blocked? false
 
-  foreach sort blockers [
-    other-car ->
-    if has-priority-over-me? other-car target [
+  foreach sort blockers [other-agent ->
+    if has-priority-over-me? other-agent target [
       set blocked? true
     ]
   ]
@@ -781,7 +1572,7 @@ end
 
 to-report traffic-priority-blocked? [target]
   
-  if agent-mode = "pedestrian" [
+  if agent-mode = "pedestrian" or bike-walking-on-edge? target [
     report false
   ]
 
@@ -824,6 +1615,8 @@ end
 
 to move.mobile-agents
    ask mobile-agents [
+    
+    set distance-moved-this-tick 0
 
     ifelse arrived? [
       set color green
@@ -836,7 +1629,7 @@ to move.mobile-agents
       set stopped? false
 
       if destination-node != nobody and current-node = destination-node [
-        vehicle-arrive
+        mark-trip-arrived
       ]
 
       if not arrived? [
@@ -893,7 +1686,7 @@ to move.mobile-agents
                 set waiting-time 0
 
                 if destination-node != nobody and current-node = destination-node [
-                  vehicle-arrive
+                  mark-trip-arrived
                   set remaining-distance 0
                 ]
               ]
@@ -901,8 +1694,17 @@ to move.mobile-agents
             ]
             [
               face next-node
+              let walking-now? bike-walking-on-edge? next-node
+              let speed-ratio 1
 
-              let desired-step-distance min (list remaining-distance d movement-step-size)
+              if walking-now? [
+                let walking-speed kmh-to-netlogo-speed
+                  (speed-kmh-from-mode "pedestrian" * speed-factor)
+
+                set speed-ratio min (list 1 (walking-speed / speed))
+              ]
+
+              let desired-step-distance min(list(remaining-distance * speed-ratio) d movement-step-size)
               let step-distance adjusted-step-distance desired-step-distance next-node
               
               ifelse step-distance = 0 [
@@ -927,8 +1729,21 @@ to move.mobile-agents
                   ]
                   [
                     fd step-distance
+                    update-roundabout-state-after-move
+                    set distance-moved-this-tick distance-moved-this-tick + step-distance
+                    set trip-distance-m trip-distance-m + (step-distance * meters-per-netlogo-unit)
                     set waiting-time 0
-                    set remaining-distance remaining-distance - step-distance
+                    set remaining-distance max
+                      (list
+                        0
+                        (remaining-distance - step-distance / speed-ratio)
+                      )
+
+                    if walking-now? [
+                      set bike-walking-distance-total-m
+                        bike-walking-distance-total-m +
+                        (step-distance * meters-per-netlogo-unit)
+                    ]
                     
                     if distance next-node < 0.0005 [
                       set previous-node current-node
@@ -936,7 +1751,7 @@ to move.mobile-agents
                       set next-node nobody
                       
                       ifelse destination-node != nobody and current-node = destination-node [
-                        vehicle-arrive
+                        mark-trip-arrived
                         set remaining-distance 0
                       ]
                       [
@@ -959,6 +1774,211 @@ to move.mobile-agents
       ]
     ]
   ]
+end
+
+to mark-trip-arrived
+  set arrived? true
+  set next-node nobody
+  set path []
+end
+
+to finish-arrived-trips
+  foreach sort (mobile-agents with [arrived?]) [finished-agent ->
+    ask finished-agent [
+      vehicle-arrive
+    ]
+  ]
+end
+
+to-report preferred-bike-path [source-set target-set]
+
+  if not any? source-set or not any? target-set [
+    report []
+  ]
+
+  let goals target-set with [
+    not member? self source-set
+  ]
+
+  if not any? goals [
+    report []
+  ]
+
+  let graph-points (turtle-set nodes waypoints)
+
+  ask graph-points [
+    set bike-route-walk-cost 1.0E+30
+    set dist 1.0E+30
+    set previous nobody
+    set visited? false
+  ]
+
+  ask source-set [
+    set bike-route-walk-cost 0
+    set dist 0
+  ]
+
+  let frontier source-set
+
+  while [any? frontier] [
+
+    let least-walking min [bike-route-walk-cost] of frontier
+
+    let tied frontier with [
+      bike-route-walk-cost = least-walking
+    ]
+
+    let current min-one-of tied [dist]
+
+    set frontier frontier with [
+      self != current
+    ]
+
+    if member? current goals [
+      let full-route (list current)
+      let cursor current
+
+      while [[previous] of cursor != nobody] [
+        set cursor [previous] of cursor
+        set full-route fput cursor full-route
+      ]
+
+      report full-route
+    ]
+
+    ask current [
+      set visited? true
+    ]
+
+    let permitted [
+      my-out-edges with [
+        member? "bike-mixed" allowed-modes
+      ]
+    ] of current
+
+    ask permitted [
+
+      let neighbor end2
+
+      if not [visited?] of neighbor [
+
+        let extra-walking 0
+
+        if road-type != "turn" and
+           not member? "bike" allowed-modes [
+          set extra-walking road-length
+        ]
+
+        let candidate-walking
+          ([bike-route-walk-cost] of current) + extra-walking
+
+        let candidate-distance
+          ([dist] of current) + road-length
+
+        if candidate-walking < [bike-route-walk-cost] of neighbor or
+           (candidate-walking = [bike-route-walk-cost] of neighbor and
+            candidate-distance < [dist] of neighbor) [
+
+          ask neighbor [
+            set bike-route-walk-cost candidate-walking
+            set dist candidate-distance
+            set previous current
+          ]
+
+          set frontier (turtle-set frontier neighbor)
+        ]
+      ]
+    ]
+  ]
+
+  report []
+end
+
+to-report bike-walking-on-edge? [target]
+
+  if agent-mode != "bike" or
+     current-node = nobody or
+     target = nobody [
+    report false
+  ]
+
+  let outgoing [my-out-edges] of current-node
+
+  report any? outgoing with [
+    end2 = target and
+    road-type != "turn" and
+    member? "bike-mixed" allowed-modes and
+    not member? "bike" allowed-modes
+  ]
+end
+
+to-report bike-path-walking-m [full-route]
+
+  let walking-length 0
+
+  if length full-route < 2 [
+    report 0
+  ]
+
+  (foreach (but-last full-route) (but-first full-route) [
+    [a b] ->
+
+    let segment one-of edges with [
+      end1 = a and end2 = b
+    ]
+
+    if segment != nobody [
+      if [road-type] of segment != "turn" and
+         not member? "bike" [allowed-modes] of segment [
+        set walking-length
+          walking-length + [road-length] of segment
+      ]
+    ]
+  ])
+
+  report walking-length * meters-per-netlogo-unit
+end
+
+to debug-bike-routes-core
+
+  let bike-routes filter [
+    r -> item 0 r = "bike"
+  ] real-route-cache
+
+  foreach bike-routes [
+    r ->
+
+    show (word
+      "Bike " item 1 r
+      " -> " item 2 r
+      " | walking m: "
+      precision
+        (bike-path-walking-m
+          (fput (item 3 r) (item 5 r)))
+        2
+    )
+  ]
+
+  show (word
+    "Total actual bicycle walking distance m: "
+    precision bike-walking-distance-total-m 2
+  )
+end
+
+to-report low-speed-upper-limit [mode]
+  if mode = "car"        [ report 15 ]
+  if mode = "bike"       [ report 7 ]
+  if mode = "pedestrian" [ report 2 ]
+
+  report 15
+end
+
+to-report intermediate-speed-upper-limit [mode]
+  if mode = "car"        [ report 25 ]
+  if mode = "bike"       [ report 14 ]
+  if mode = "pedestrian" [ report 4 ]
+
+  report 25
 end
 
 to select.origin
@@ -1038,14 +2058,12 @@ to precompute-all-random-routes
   set route-pool []
 
   precompute-random-routes "car" route-pool-target-size
-  precompute-random-routes "bus" route-pool-target-size
   precompute-random-routes "bike" route-pool-target-size
   precompute-random-routes "pedestrian" route-pool-target-size
 end
 
 to debug-route-pool
   show (word "car routes in pool: " length filter [r -> item 0 r = "car"] route-pool)
-  show (word "bus routes in pool: " length filter [r -> item 0 r = "bus"] route-pool)
   show (word "bike routes in pool: " length filter [r -> item 0 r = "bike"] route-pool)
   show (word "pedestrian routes in pool: " length filter [r -> item 0 r = "pedestrian"] route-pool)
 end
@@ -1083,7 +2101,7 @@ to generate-traffic-if-needed
     let mode traffic-generation-mode
 
     if mode = "mixed" [
-      set mode one-of ["car" "bus" "bike" "pedestrian"]
+      set mode one-of ["car" "bike" "pedestrian"]
     ]
 
     generate-random-agent-from-pool mode
@@ -1139,6 +2157,18 @@ to-report nearest-destination-point [x y]
 end
 
 to-report shortest-path [source target mode]
+  
+  if mode = "bike" [
+    let full-route preferred-bike-path
+      (turtle-set source)
+      (turtle-set target)
+
+    if empty? full-route [
+      report []
+    ]
+
+    report but-first full-route
+  ]
 
   let graph-points (turtle-set nodes waypoints)
 
@@ -1231,6 +2261,7 @@ to create.vehicle.from.selection
     set size 0.5
     set shape "car"
     set agent-mode "car"
+    set roundabout-inside? false
 
     set current-node origin-point
     move-to current-node
@@ -1313,6 +2344,35 @@ to-report two-digits [n]
   report word n ""
 end
 
+to-report slot-start-time [slot-value]
+  let total-minutes slot-value * 15
+  let hour-value floor (total-minutes / 60)
+  let minute-value total-minutes mod 60
+
+  report (word
+    two-digits hour-value
+    ":"
+    two-digits minute-value
+  )
+end
+
+to-report selected-flow-end-time
+  let end-minutes
+    (selected-flow-slot * 15) +
+    simulation-duration-minutes
+
+  let normalized-minutes end-minutes mod 1440
+
+  let hour-value floor (normalized-minutes / 60)
+  let minute-value normalized-minutes mod 60
+
+  report (word
+    two-digits hour-value
+    ":"
+    two-digits minute-value
+  )
+end
+
 to-report sim-clock
   let total floor sim-time-seconds
   let h floor (total / 3600)
@@ -1335,10 +2395,14 @@ to export-results
 end
 
 to go-manual
+  update-copresence-times
+  update-encounters
   update.mobile-agent.speed
   move.mobile-agents
+  update-speed-duration-times
 
   set sim-time-seconds sim-time-seconds + seconds-per-tick
+  finish-arrived-trips
   tick
 end
 
@@ -1349,10 +2413,14 @@ to go
   ]
 
   generate-traffic-if-needed
+  update-copresence-times
+  update-encounters
   update.mobile-agent.speed
   move.mobile-agents
+  update-speed-duration-times
 
   set sim-time-seconds sim-time-seconds + seconds-per-tick
+  finish-arrived-trips
   tick
 end
 
@@ -1363,7 +2431,7 @@ to initialize-simulation
   let mode traffic-generation-mode
 
   if mode = "mixed" [
-    set mode one-of ["car" "bus" "bike" "pedestrian"]
+    set mode one-of ["car" "bike" "pedestrian"]
   ]
 
   generate-random-agent-from-pool mode
@@ -1382,9 +2450,3091 @@ to demo-run
   export-results
 
   user-message "Demo finished. Results exported to outputs/simulation_results.csv"
+end
+
+to setup-real-flow-simulation
+  setup
+  set simulation-duration-seconds simulation-duration-minutes * 60
+  reset-timer
+  load-flow-zones
+  show (word "load-flow-zones time: " timer)
+
+  reset-timer
+  assign-flow-zone-nodes
+  show (word "assign-flow-zone-nodes time: " timer)
+
+  reset-timer
+  load-flow-counts
+  show (word "load-flow-counts time: " timer)
+
+  let requested-slots selected-flow-slots
+  let maximum-slot maximum-available-flow-slot
+
+  if empty? requested-slots [
+    user-message "No flow slots were selected."
+    stop
+  ]
+
+  if last requested-slots > maximum-slot [
+    user-message
+      (word
+        "The selected duration requires slots "
+        first requested-slots
+        " to "
+        last requested-slots
+        ", but the last available slot is "
+        maximum-slot
+        "."
+      )
+    stop
+  ]
+
+  show (word
+    "Simulation duration: "
+    simulation-duration-minutes
+    " minutes"
+  )
+
+  show (word
+    "Selected flow slots: "
+    requested-slots
+  )
+
+  reset-timer
+  precompute-zone-to-zone-routes
+  show (word "precompute-zone-to-zone-routes time: " timer)
+
+  reset-timer
+  precompute-real-flow-routes
+  show (word "precompute-real-flow-routes time: " timer)
+end
+
+to-report real-flow-simulation-finished?
+  report
+    sim-time-seconds >= simulation-duration-seconds and
+    empty? scheduled-trips and
+    count mobile-agents = 0
+end
+
+to precompute-zone-to-zone-routes
+  set real-route-cache []
+
+  let transport-modes [
+    "pedestrian"
+    "bike"
+    "car"
+  ]
+
+  let slots selected-flow-slots
+
+  foreach transport-modes [
+    transport-mode ->
+
+    foreach sort flow-zones [
+      origin-zone ->
+
+      foreach sort flow-zones [
+        target-zone ->
+
+        if [zone-id] of origin-zone !=
+           [zone-id] of target-zone [
+
+          let route-needed? false
+
+          foreach slots [
+            slot-value ->
+
+            let origin-flow
+              get-flow-count
+                slot-value
+                ([zone-id] of origin-zone)
+                transport-mode
+                "inflow"
+
+            let target-flow
+              get-flow-count
+                slot-value
+                ([zone-id] of target-zone)
+                transport-mode
+                "outflow"
+
+            if origin-flow > 0 and target-flow > 0 [
+              set route-needed? true
+            ]
+          ]
+
+          if route-needed? [
+            show (word
+              "Computing "
+              transport-mode
+              " from "
+              [zone-id] of origin-zone
+              " to "
+              [zone-id] of target-zone
+            )
+
+            let route build-zone-route transport-mode origin-zone target-zone
+
+            ifelse not empty? route [
+              set real-route-cache lput route real-route-cache
+            ]
+            [
+              show (word
+                "No route found for "
+                transport-mode
+                " from "
+                [zone-id] of origin-zone
+                " to "
+                [zone-id] of target-zone
+              )
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+
+  show (word
+    "Precomputed zone-to-zone routes: "
+    length real-route-cache
+  )
+end
+
+to-report radius-from-zone-id [zid]
+  if zid = "7.1" [ report 2 ]
+  if zid = "7.3" [ report 1.4 ]
+  if zid = "7.4" [ report 2 ]
+  if zid = "7.5" [ report 0.8 ]
+  if zid = "7.6" [ report 2 ]
+
+  report 0.6
+end
+
+to-report build-zone-route [transport-mode origin-zone target-zone]
+  
+  if transport-mode = "bike" [
+
+    let starts get-candidate-nodes-from-zone
+      origin-zone "bike" "inflow"
+
+    let finishes get-candidate-nodes-from-zone
+      target-zone "bike" "outflow"
+
+    let full-route preferred-bike-path starts finishes
+
+    if empty? full-route [
+      report []
+    ]
+
+    let walked-m bike-path-walking-m full-route
+    let route-kind "cycle-only"
+
+    if walked-m > 0 [
+      set route-kind "cycle-plus-walking"
+    ]
+
+    show (word
+      "Bike route " [zone-id] of origin-zone
+      " -> " [zone-id] of target-zone
+      " | " route-kind
+      " | walking m: " precision walked-m 2
+    )
+
+    report (list
+      "bike"
+      ([zone-id] of origin-zone)
+      ([zone-id] of target-zone)
+      (first full-route)
+      (last full-route)
+      (but-first full-route)
+    )
+  ]
+  let origin-nodes get-candidate-nodes-from-zone origin-zone transport-mode "inflow"
+  let target-nodes get-candidate-nodes-from-zone target-zone transport-mode "outflow"
+
+  if (not any? origin-nodes) or (not any? target-nodes) [
+    report []
+  ]
+
+  let origin-list sort origin-nodes
+  let target-list sort target-nodes
+
+  set origin-list sort-by [
+    [a b] -> [distance origin-zone] of a < [distance origin-zone] of b
+  ] origin-list
+
+  set target-list sort-by [
+    [a b] -> [distance target-zone] of a < [distance target-zone] of b
+  ] target-list
+
+  set origin-list first-n-items 5 origin-list
+  set target-list first-n-items 5 target-list
+
+  foreach origin-list [
+    origin ->
+
+    foreach target-list [
+      destination ->
+
+      if origin != destination [
+        let new-path shortest-path origin destination transport-mode
+
+        if not empty? new-path [
+          report (list
+            transport-mode
+            ([zone-id] of origin-zone)
+            ([zone-id] of target-zone)
+            origin
+            destination
+            new-path
+          )
+        ]
+      ]
+    ]
+  ]
+
+  report []
+end
+
+to-report first-n-items [n lst]
+  if length lst <= n [
+    report lst
+  ]
+
+  report sublist lst 0 n
+end
+
+to debug-flow-zone-candidates
+  ask flow-zones [
+    show (word
+      "Zone " zone-id
+      " | ped in/out: " count pedestrian-in-nodes "/" count pedestrian-out-nodes
+      " | bike in/out: " count bike-in-nodes "/" count bike-out-nodes
+      " | car in/out: " count car-in-nodes "/" count car-out-nodes
+    )
+  ]
+end
+
+to load-flow-zones
+  set flow-zones-dataset gis:load-dataset "data/10731/In_Out_15min.geojson"
+
+  let created-zone-ids []
+
+  foreach gis:feature-list-of flow-zones-dataset [
+    feat ->
+
+    let name-value word gis:property-value feat "name" ""
+    let zid zone-id-from-name name-value
+
+    if not member? zid created-zone-ids [
+
+      let coords gis:location-of (first (first (gis:vertex-lists-of feat)))
+
+      if not empty? coords [
+        create-flow-zones 1 [
+          setxy item 0 coords item 1 coords
+
+          set zone-id zid
+          set zone-radius radius-from-zone-id zid
+
+          set pedestrian-in-nodes no-turtles
+          set pedestrian-out-nodes no-turtles
+          set bike-in-nodes no-turtles
+          set bike-out-nodes no-turtles
+          set car-in-nodes no-turtles
+          set car-out-nodes no-turtles
+
+          set shape "circle"
+          set size zone-radius
+          set color green
+        ]
+
+        set created-zone-ids lput zid created-zone-ids
+      ]
+    ]
+  ]
+
+  show (word "Loaded flow zones: " count flow-zones)
+end
+
+to assign-flow-zone-nodes
+  ask flow-zones [
+    set pedestrian-in-nodes candidate-nodes-for-zone self "pedestrian" "inflow"
+    set pedestrian-out-nodes candidate-nodes-for-zone self "pedestrian" "outflow"
+
+    set bike-in-nodes candidate-nodes-for-zone self "bike" "inflow"
+    set bike-out-nodes candidate-nodes-for-zone self "bike" "outflow"
+
+    set car-in-nodes candidate-nodes-for-zone self "car" "inflow"
+    set car-out-nodes candidate-nodes-for-zone self "car" "outflow"
+  ]
+end
+
+to-report candidate-nodes-for-zone [z mode direction]
+  let graph-points no-turtles
+
+  if direction = "inflow" [
+    set graph-points (turtle-set nodes waypoints) with [
+      any? my-out-edges with [
+        member? mode allowed-modes
+      ]
+    ]
+  ]
+
+  if direction = "outflow" [
+    set graph-points (turtle-set nodes waypoints) with [
+      any? my-in-edges with [
+        member? mode allowed-modes
+      ]
+    ]
+  ]
+
+  if not any? graph-points [
+    report no-turtles
+  ]
+
+  let nearby graph-points with [
+    distance z <= [zone-radius] of z
+  ]
+
+  if any? nearby [
+    report nearby
+  ]
+
+  report min-n-of 15 graph-points [
+    distance z
+  ]
+end
+
+to-report zone-id-from-name [txt]
+  let result ""
+  let i 0
+
+  while [i < length txt] [
+    let ch substring txt i (i + 1)
+
+    ifelse ch = "_" [
+      set result ""
+    ]
+    [
+      set result word result ch
+    ]
+
+    set i i + 1
+  ]
+
+  report result
+end
+
+to load-flow-counts
+  let rows csv:from-file "dataNetlogo/flow_counts.csv"
+
+  set flow-counts []
+
+  foreach but-first rows [row ->
+    let slot-value as-number item 0 row
+    let zid word item 2 row ""
+    let mode word item 3 row ""
+    let direction word item 4 row ""
+    let original-amount as-number item 5 row
+
+    let scaled-amount original-amount * run-demand-factor
+
+    set flow-counts lput
+      (list slot-value zid mode direction scaled-amount)
+      flow-counts
+  ]
+
+  show (word
+    "Loaded flow count rows: " length flow-counts
+    " | demand factor: " run-demand-factor
+  )
+end
+
+to-report as-number [x]
+  if is-number? x [
+    report x
+  ]
+
+  report read-from-string (word x "")
+end
+
+to-report get-flow-count [slot-value zid mode direction]
+  let matches filter [
+    row ->
+      item 0 row = slot-value and
+      item 1 row = zid and
+      item 2 row = mode and
+      item 3 row = direction
+  ] flow-counts
+
+  if empty? matches [
+    report 0
+  ]
+
+  report item 4 first matches
+end
+
+to-report get-candidate-nodes-from-zone [z mode direction]
+  if mode = "pedestrian" [
+    if direction = "inflow" [ report [pedestrian-in-nodes] of z ]
+    if direction = "outflow" [ report [pedestrian-out-nodes] of z ]
+  ]
+
+  if mode = "bike" [
+    if direction = "inflow" [ report [bike-in-nodes] of z ]
+    if direction = "outflow" [ report [bike-out-nodes] of z ]
+  ]
+
+  if mode = "car" [
+    if direction = "inflow" [ report [car-in-nodes] of z ]
+    if direction = "outflow" [ report [car-out-nodes] of z ]
+  ]
+
+  report no-turtles
+end
+
+to-report get-outflow-used [slot-value zid mode]
+  let matches filter [
+    row ->
+      item 0 row = slot-value and
+      item 1 row = zid and
+      item 2 row = mode
+  ] outflow-usage
+
+  if empty? matches [
+    report 0
+  ]
+
+  report item 3 first matches
+end
+
+to increment-outflow-used [slot-value zid mode]
+  let updated []
+  let found? false
+
+  foreach outflow-usage [
+    row ->
+
+    ifelse item 0 row = slot-value and item 1 row = zid and item 2 row = mode [
+      set updated lput (list slot-value zid mode ((item 3 row) + 1)) updated
+      set found? true
+    ]
+    [
+      set updated lput row updated
+    ]
+  ]
+
+  if not found? [
+    set updated lput (list slot-value zid mode 1) updated
+  ]
+
+  set outflow-usage updated
+end
+
+to-report remaining-outflow-weight [slot-value zid mode]
+  let expected get-flow-count slot-value zid mode "outflow"
+  let used get-outflow-used slot-value zid mode
+
+  let remaining expected - used
+
+  if remaining > 0 [
+    report remaining
+  ]
+
+  report 0
+end
+
+to-report choose-weighted-outflow-zone [slot-value mode origin-zone]
+  let options sort flow-zones with [
+    zone-id != [zone-id] of origin-zone and
+    get-flow-count slot-value zone-id mode "outflow" > 0 and
+    any? (get-candidate-nodes-from-zone self mode "outflow")
+  ]
+
+  if empty? options [
+    report nobody
+  ]
+
+  let weights map [
+    z -> remaining-outflow-weight slot-value ([zone-id] of z) mode
+  ] options
+
+  let total sum weights
+
+  if total <= 0 [
+    set weights map [
+      z -> get-flow-count slot-value ([zone-id] of z) mode "outflow"
+    ] options
+
+    set total sum weights
+  ]
+
+  if total <= 0 [
+    report item random length options options
+  ]
+
+  let r random-float total
+  let acc 0
+  let i 0
+
+  while [i < length options] [
+    set acc acc + item i weights
+
+    if r <= acc [
+      report item i options
+    ]
+
+    set i i + 1
+  ]
+
+  report last options
+end
+
+to-report number-of-selected-flow-slots
+  report floor (
+    simulation-duration-seconds /
+    flow-slot-duration-seconds
+  )
+end
+
+to-report selected-flow-slots
+  let number-of-slots number-of-selected-flow-slots
+
+  report n-values number-of-slots [
+    slot-offset ->
+      selected-flow-slot + slot-offset
+  ]
+end
+
+to-report maximum-available-flow-slot
+  if empty? flow-counts [
+    report -1
+  ]
+
+  report max map [
+    row -> item 0 row
+  ] flow-counts
+end
+
+to precompute-real-flow-routes
+  set scheduled-trips []
+  set outflow-usage []
+  let slots selected-flow-slots
+
+  let inflow-rows filter [
+    row ->
+      member? (item 0 row) slots and
+      item 3 row = "inflow" and
+      item 4 row > 0
+  ] flow-counts
+
+  foreach inflow-rows [
+    row ->
+
+    let slot-value item 0 row
+    let zid item 1 row
+    let mode item 2 row
+    let amount round item 4 row
+
+    let origin-zone one-of flow-zones with [
+      zone-id = zid
+    ]
+
+    if origin-zone != nobody [
+      repeat amount [
+        let trip build-real-flow-trip slot-value mode origin-zone
+
+        ifelse not empty? trip [
+          set scheduled-trips
+            lput trip scheduled-trips
+        ]
+        [
+          set failed-paths failed-paths + 1
+        ]
+      ]
+    ]
+  ]
+
+  set scheduled-trips sort-by [
+    [trip-a trip-b] ->
+      item 0 trip-a < item 0 trip-b
+  ] scheduled-trips
+
+  show (word "Selected slots: " slots)
+  show (word "Precomputed real trips: " length scheduled-trips)
+  show (word "Failed real trips: " failed-paths)
+end
+
+to-report build-real-flow-trip
+  [slot-value mode origin-zone]
+
+  let cached-route choose-weighted-cached-route slot-value mode origin-zone
+
+  if empty? cached-route [
+    report []
+  ]
+
+  let target-zid item 2 cached-route
+  let origin item 3 cached-route
+  let destination item 4 cached-route
+  let new-path item 5 cached-route
+
+  increment-outflow-used
+    slot-value
+    target-zid
+    mode
+
+  let slot-offset slot-value - selected-flow-slot
+
+  let slot-starting-time slot-offset * flow-slot-duration-seconds
+
+  let spawn-time slot-starting-time + random-float flow-slot-duration-seconds
+
+  report (list
+    spawn-time
+    mode
+    ([zone-id] of origin-zone)
+    target-zid
+    origin
+    destination
+    new-path
+    slot-value
+  )
+end
+
+to-report completed-trip-count-by-mode [transport-mode]
+
+  if transport-mode = "all" [
+    report length completed-trip-metrics
+  ]
+
+  report length filter [
+    record ->
+      item 0 record = transport-mode
+  ] completed-trip-metrics
+end
+
+to-report choose-weighted-cached-route [slot-value mode origin-zone]
+  let candidates filter [
+    r ->
+      item 0 r = mode and
+      item 1 r = [zone-id] of origin-zone
+  ] real-route-cache
+
+  if empty? candidates [
+    report []
+  ]
+
+  let weights map [
+    r -> remaining-outflow-weight slot-value (item 2 r) mode
+  ] candidates
+
+  let total sum weights
+
+  if total <= 0 [
+    set weights map [
+      r -> get-flow-count slot-value (item 2 r) mode "outflow"
+    ] candidates
+
+    set total sum weights
+  ]
+
+  if total <= 0 [
+    report item random length candidates candidates
+  ]
+
+  let r random-float total
+  let acc 0
+  let i 0
+
+  while [i < length candidates] [
+    set acc acc + item i weights
+
+    if r <= acc [
+      report item i candidates
+    ]
+
+    set i i + 1
+  ]
+
+  report last candidates
+end
+
+to create-scheduled-mobile-agent [mode origin destination new-path origin-zid target-zid spawn-time source-slot]
+  if mode = "car" [
+    create-vehicles 1 [
+      set color yellow
+      set size 0.5
+      set shape "car"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+      set flow-slot-id source-slot
+    ]
+    stop
+  ]
+
+  if mode = "bike" [
+    create-bicycles 1 [
+      set color pink
+      set size 0.5
+      set shape "wheel"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+      set flow-slot-id source-slot
+    ]
+    stop
+  ]
+
+  if mode = "pedestrian" [
+    create-pedestrians 1 [
+      set color orange
+      set size 0.3
+      set shape "person"
+
+      setup-mobile-agent mode origin destination new-path
+
+      set origin-zone-id origin-zid
+      set destination-zone-id target-zid
+      set scheduled-spawn-time spawn-time
+      set flow-slot-id source-slot
+    ]
+    stop
+  ]
+end
+
+to generate-scheduled-real-agents
+  while [
+    not empty? scheduled-trips and
+    item 0 first scheduled-trips <= sim-time-seconds and
+    count mobile-agents < max-active-vehicles
+  ] [
+
+    let trip first scheduled-trips
+    set scheduled-trips but-first scheduled-trips
+
+    let spawn-time item 0 trip
+    let mode item 1 trip
+    let origin-zid item 2 trip
+    let target-zid item 3 trip
+    let origin item 4 trip
+    let destination item 5 trip
+    let new-path item 6 trip
+    let source-slot item 7 trip
+
+    create-scheduled-mobile-agent mode origin destination new-path origin-zid target-zid spawn-time source-slot
+
+    set generated-vehicles generated-vehicles + 1
+  ]
+end
+
+to-report average-trajectory-distance-km [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [
+    r -> item 3 r
+  ] records
+end
+
+to-report average-trajectory-speed-kmh [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [
+    r -> item 2 r
+  ] records
+end
+
+to-report average-trajectory-duration-min [transport-mode]
+  let records completed-trip-records-by-mode transport-mode
+
+  if empty? records [
+    report 0
+  ]
+
+  report mean map [
+    r -> item 1 r
+  ] records
+end
+
+to-report completed-trip-records-by-mode [transport-mode]
+  if transport-mode = "all" [
+    report completed-trip-metrics
+  ]
+
+  report filter [
+    r -> item 0 r = transport-mode
+  ] completed-trip-metrics
+end
+
+to update-trajectory-duration-plot
+  set-current-plot "Trajectory duration"
+  
+  let time-min sim-time-seconds / 60
+
+  set-current-plot-pen "all"
+  plotxy time-min average-trajectory-duration-min "all"
+
+  set-current-plot-pen "car"
+  plotxy time-min average-trajectory-duration-min "car"
+
+  set-current-plot-pen "bike"
+  plotxy time-min average-trajectory-duration-min "bike"
+
+  set-current-plot-pen "pedestrian"
+  plotxy time-min average-trajectory-duration-min "pedestrian"
+end
+
+to update-trajectory-speed-plot
+  set-current-plot "Trajectory speed"
+  
+  let time-min sim-time-seconds / 60
+
+  set-current-plot-pen "all"
+  plotxy time-min average-trajectory-speed-kmh "all"
+
+  set-current-plot-pen "car"
+  plotxy time-min average-trajectory-speed-kmh "car"
+
+  set-current-plot-pen "bike"
+  plotxy time-min average-trajectory-speed-kmh "bike"
+
+  set-current-plot-pen "pedestrian"
+  plotxy time-min average-trajectory-speed-kmh "pedestrian"
+end
+
+to update-trajectory-distance-plot
+  set-current-plot "Trajectory distance"
+
+  let time-min sim-time-seconds / 60
+
+  set-current-plot-pen "all"
+  plotxy time-min average-trajectory-distance-km "all"
+
+  set-current-plot-pen "car"
+  plotxy time-min average-trajectory-distance-km "car"
+
+  set-current-plot-pen "bike"
+  plotxy time-min average-trajectory-distance-km "bike"
+
+  set-current-plot-pen "pedestrian"
+  plotxy time-min average-trajectory-distance-km "pedestrian"
+end
+
+to update-congestion-duration-plot
+  set-current-plot "Congestion duration"
+
+  let time-min sim-time-seconds / 60
+  
+  set-current-plot-pen "all"
+  plotxy time-min average-congestion-duration-min "all"
+
+  set-current-plot-pen "car"
+  plotxy time-min average-congestion-duration-min "car"
+
+  set-current-plot-pen "bike"
+  plotxy time-min average-congestion-duration-min "bike"
+
+  set-current-plot-pen "pedestrian"
+  plotxy time-min average-congestion-duration-min "pedestrian"
+end
+
+to update-trajectory-speed-duration-plot
+  set-current-plot "Trajectory speed duration"
+
+  let time-min sim-time-seconds / 60
+  let mode "all"
+
+  set-current-plot-pen "stopped"
+  plotxy time-min
+    average-congestion-duration-min mode
+
+  set-current-plot-pen "low"
+  plotxy time-min
+    average-low-speed-duration-min mode
+
+  set-current-plot-pen "intermediate"
+  plotxy time-min
+    average-intermediate-speed-duration-min mode
+
+  set-current-plot-pen "high"
+  plotxy time-min
+    average-high-speed-duration-min mode
+end
+
+to update-copresence-plot
+  set-current-plot "Copresence time"
+
+  let time-min sim-time-seconds / 60
+  let selected-mode "all"
+
+  set-current-plot-pen "car"
+  plotxy time-min
+    average-copresence-car-percentage selected-mode
+
+  set-current-plot-pen "bike"
+  plotxy time-min
+    average-copresence-bike-percentage selected-mode
+
+  set-current-plot-pen "pedestrian"
+  plotxy time-min
+    average-copresence-pedestrian-percentage selected-mode
+end
+
+to-report indicator-values [indicator-name transport-mode]
+
+  let records completed-trip-records-by-mode transport-mode
+
+  if indicator-name = "duration" [
+    report map [r -> item 1 r] records
+  ]
+
+  if indicator-name = "speed" [
+    report map [r -> item 2 r] records
+  ]
+
+  if indicator-name = "distance" [
+    report map [r -> item 3 r] records
+  ]
+
+  if indicator-name = "congestion" [
+    report map [r -> item 4 r] records
+  ]
+
+  if indicator-name = "low-speed-duration" [
+    report map [r -> item 5 r] records
+  ]
+
+  if indicator-name = "intermediate-speed-duration" [
+    report map [r -> item 6 r] records
+  ]
+
+  if indicator-name = "high-speed-duration" [
+    report map [r -> item 7 r] records
+  ]
+
+  if indicator-name = "copresence-car" [
+    set records filter [
+      r -> item 0 r != "car"
+    ] records
+    report map [
+      r -> 100 * item 8 r
+    ] records
+  ]
+
+  if indicator-name = "copresence-bike" [
+    set records filter [
+      r -> item 0 r != "bike"
+    ] records
+    report map [
+      r -> 100 * item 9 r
+    ] records
+  ]
+
+  if indicator-name = "copresence-pedestrian" [
+    set records filter [
+      r -> item 0 r != "pedestrian"
+    ] records
+    report map [
+      r -> 100 * item 10 r
+    ] records
+  ]
+
+  report []
+end
+
+to-report selected-indicator-values
+
+  if selected-indicator = "copresence" [
+
+    if copresence-target = "car" [
+      report indicator-values "copresence-car" plot-mode
+    ]
+
+    if copresence-target = "bike" [
+      report indicator-values "copresence-bike" plot-mode
+    ]
+
+    report indicator-values "copresence-pedestrian" plot-mode
+  ]
+
+  report indicator-values selected-indicator plot-mode
+end
+
+to-report mean-or-zero [values]
+  if empty? values [
+    report 0
+  ]
+
+  report mean values
+end
+
+to-report last-n-values [values number-of-values]
+
+  if empty? values [
+    report []
+  ]
+
+  let n max (list 1 floor number-of-values)
+
+  if length values <= n [
+    report values
+  ]
+
+  report sublist values (length values - n) length values
+end
+
+to-report histogram-interval-for [values]
+
+  if empty? values [
+    report 1
+  ]
+
+  if length values = 1 [
+    report 1
+  ]
+
+  let minimum-value min values
+  let maximum-value max values
+
+  let value-range
+    maximum-value - minimum-value
+
+  if value-range <= 0 [
+    report 1
+  ]
+
+  let number-of-bins
+    round sqrt length values
+
+  set number-of-bins
+    max (list 5 number-of-bins)
+
+  set number-of-bins
+    min (list 15 number-of-bins)
+
+  report value-range / number-of-bins
+end
+ 
+to-report current-plot-signature
+  report (word
+    selected-indicator "|"
+    plot-view "|"
+    plot-mode "|"
+    copresence-target "|"
+    sliding-window-size)
+end
+
+to update-indicator-plot
+
+  set-current-plot "Indicator plot"
+
+  let signature current-plot-signature
+
+  if signature != last-plot-signature [
+    clear-plot
+    set last-plot-signature signature
+  ]
+
+  let values selected-indicator-values
+  let time-min sim-time-seconds / 60
+
+  if plot-view = "mean" [
+    set-current-plot-pen "value"
+    set-plot-pen-mode 0
+
+    plotxy time-min (mean-or-zero values)
+  ]
+
+  if plot-view = "sliding" [
+    let sliding-values
+      last-n-values values sliding-window-size
+
+    set-current-plot-pen "value"
+    set-plot-pen-mode 0
+
+    plotxy time-min (mean-or-zero sliding-values)
+  ]
+
+  if plot-view = "histogram" [
+    clear-plot
+    set-current-plot-pen "value"
+    set-plot-pen-mode 1
+    
+    if not empty? values [
+      set-plot-pen-interval histogram-interval-for values
+      histogram values
+    ]
+  ]
+
+end
+
+to-report selected-indicator-mean
+  report mean-or-zero selected-indicator-values
+end
+
+to-report selected-indicator-unit
+
+  if selected-indicator = "speed" [
+    report "km/h"
+  ]
+
+  if selected-indicator = "distance" [
+    report "km"
+  ]
+
+  if selected-indicator = "copresence" [
+    report "%"
+  ]
+
+  report "min"
+end
+
+to clear-encounter-heatmap-core
+
+  ask patches [
+    set encounter-count 0
+    set pcolor white
+  ]
+
+end
+
+to export-encounter-heatmap
+
+  if show-encounter-heatmap? [
+    update-encounter-heatmap
+  ]
+
+  display
+
+  export-view
+    (word "outputs/encounter_heatmap_run_" run-id ".png")
+
+  show (word
+    "Encounter heatmap exported to outputs/encounter_heatmap_run_"
+    run-id
+    ".png"
+  )
+
+end
+
+to run-multiple-simulations
+
+  let total-runs max (list 1 (round number-of-runs))
+  let base-seed experiment-seed
+
+  if base-seed != floor base-seed or
+     base-seed < 0 or
+     (base-seed + total-runs - 1) > 2147483647 [
+    error "La semilla inicial y las semillas del lote deben estar entre 0 y 2147483647."
+  ]
+
+  let current-batch-run 1
+
+  show (word
+    "Starting batch of " total-runs
+    " simulations. Seeds: " base-seed
+    " to " (base-seed + total-runs - 1)
+  )
+
+  carefully [
+
+    no-display
+
+    while [current-batch-run <= total-runs] [
+
+      set experiment-seed
+        base-seed + current-batch-run - 1
+
+      show (word
+        "Preparing batch simulation "
+        current-batch-run " of " total-runs
+        " | seed: " experiment-seed
+      )
+
+      setup-real-flow-simulation
+
+      show (word
+        "Running simulation with run-id " run-id
+        " | seed: " run-seed
+      )
+
+      while [not real-flow-run-ended?] [
+        go-real-flow-step
+      ]
+
+      finish-real-flow-run
+
+      show (word
+        "Processed batch simulation "
+        current-batch-run " of " total-runs
+        " | seed: " run-seed
+        " | status: " real-flow-run-status
+      )
+
+      set current-batch-run current-batch-run + 1
+    ]
+
+  ] [
+    set experiment-seed base-seed
+    display
+    error error-message
+  ]
+
+  set experiment-seed base-seed
+  display
+
+  user-message (word
+    total-runs
+    " simulations processed and exported. Check run_status. Seeds: "
+    base-seed " to " (base-seed + total-runs - 1)
+  )
+end
+
+to finish-real-flow-run
+  if not real-flow-run-ended? [
+    error "La ejecucion sigue en curso; no puede finalizarse."
+  ]
+
+  if not results-exported? [
+    close-all-active-encounters
+
+    if show-encounter-heatmap? [
+      update-encounter-heatmap
+      export-encounter-heatmap
+    ]
+
+    export-trip-results
+    export-simulation-summary
+    export-encounters
+
+    set results-exported? true
+
+    show (word
+      "Run " run-id
+      " | status: " real-flow-run-status
+      " | completed: " completed-trips
+      " | active: " count mobile-agents
+      " | pending: " length scheduled-trips
+      " | exported."
+    )
+  ]
+end
+
+to go-real-flow-step
+  if results-exported? or real-flow-run-ended? [
+    stop
+  ]
+
+  generate-scheduled-real-agents
+  update-copresence-times
+  update-encounters
+  update.mobile-agent.speed
+  move.mobile-agents
+  update-speed-duration-times
+
+  set sim-time-seconds sim-time-seconds + seconds-per-tick
+  finish-arrived-trips
+
+  update-indicator-plot
+
+  if show-encounter-heatmap? [
+    if ticks mod 25 = 0 [
+      update-encounter-heatmap
+    ]
+  ]
+
+  tick
+end
+
+to go-real-flow
+  if results-exported? [
+    stop
+  ]
+
+  if not real-flow-run-ended? [
+    go-real-flow-step
+  ]
+
+  if real-flow-run-ended? [
+    finish-real-flow-run
+
+    user-message (word
+      "Run " run-id
+      " | status: " real-flow-run-status
+      " | completed trips: " completed-trips
+      " | active agents: " count mobile-agents
+      " | pending entries: " length scheduled-trips
+    )
+
+    stop
+  ]
+end
+
+to update-copresence-times
+  with-local-randomness [
+    update-copresence-times-core
+  ]
+end
+
+to update-encounters
+  with-local-randomness [
+    update-encounters-core
+  ]
+end
+
+to update-speed-duration-times
+  with-local-randomness [
+    update-speed-duration-times-core
+  ]
+end
+
+to update-encounter-heatmap
+  with-local-randomness [
+    update-encounter-heatmap-core
+  ]
+end
+
+to clear-encounter-heatmap
+  with-local-randomness [
+    clear-encounter-heatmap-core
+  ]
+end
+
+to check-real-route-permissions
+  with-local-randomness [
+    check-real-route-permissions-core
+  ]
+end
+
+to debug-bike-routes
+  with-local-randomness [
+    debug-bike-routes-core
+  ]
+end
+
+to test-bike-segment-speeds
+
+  if any? mobile-agents [
+    user-message "La prueba requiere que no haya agentes circulando."
+    stop
+  ]
+
+  let cycling-edges edges with [
+    road-type != "turn" and
+    member? "bike" allowed-modes and
+    road-length * meters-per-netlogo-unit > 12
+  ]
+
+  let walking-edges edges with [
+    road-type != "turn" and
+    member? "bike-mixed" allowed-modes and
+    not member? "bike" allowed-modes and
+    road-length * meters-per-netlogo-unit > 12
+  ]
+
+  if not any? cycling-edges or not any? walking-edges [
+    user-message "No se encuentran tramos suficientemente largos para la prueba."
+    stop
+  ]
+
+  let saved-walking-distance bike-walking-distance-total-m
+
+  let cycling-edge max-one-of cycling-edges [road-length]
+  let walking-edge max-one-of walking-edges [road-length]
+
+  (foreach
+    (list cycling-edge walking-edge)
+    (list "CICLISTA" "PEATONAL A PIE")
+    (list 15 5)
+    [
+      [selected-edge label-text expected-speed] ->
+
+      let origin [end1] of selected-edge
+      let target [end2] of selected-edge
+      let test-agent nobody
+
+      create-bicycles 1 [
+        setup-mobile-agent "bike" origin target (list target)
+
+        set speed-factor 1
+        set color pink
+        set size 0.5
+        set test-agent self
+      ]
+
+      let measured-distance-m 0
+      let steps-to-test 10
+
+      repeat steps-to-test [
+        update.mobile-agent.speed
+        move.mobile-agents
+
+        set measured-distance-m
+          measured-distance-m +
+          ([distance-moved-this-tick] of test-agent *
+            meters-per-netlogo-unit)
+      ]
+
+      let elapsed-seconds steps-to-test * seconds-per-tick
+
+      let measured-speed
+        (measured-distance-m / elapsed-seconds) * 3.6
+
+      let passed?
+        abs (measured-speed - expected-speed) < 0.001
+
+      show (word
+        label-text
+        " | esperada: " expected-speed " km/h"
+        " | medida: " precision measured-speed 6 " km/h"
+        " | correcto: " passed?
+      )
+
+      ask test-agent [
+        die
+      ]
+    ]
+  )
+
+  set bike-walking-distance-total-m saved-walking-distance
+end
+
+to check-scheduled-demand
+  let slots selected-flow-slots
+  let expected-total 0
+  let all-match? true
+
+  foreach slots [slot-value ->
+    foreach ["7.1" "7.3" "7.4" "7.5" "7.6"] [zid ->
+      foreach ["car" "bike" "pedestrian"] [mode-value ->
+
+        let input-rows filter [row ->
+          item 0 row = slot-value and
+          item 1 row = zid and
+          item 2 row = mode-value and
+          item 3 row = "inflow"
+        ] flow-counts
+
+        let expected sum (map [row ->
+          round (item 4 row)
+        ] input-rows)
+
+        let scheduled length (filter [trip ->
+          item 7 trip = slot-value and
+          item 2 trip = zid and
+          item 1 trip = mode-value
+        ] scheduled-trips)
+
+        set expected-total expected-total + expected
+
+        if expected != scheduled [
+          set all-match? false
+        ]
+
+        show (word
+          "Slot " slot-value
+          " | zona " zid
+          " | " mode-value
+          " | entradas del escenario: " expected
+          " | programados: " scheduled
+          " | coincide: " (expected = scheduled)
+        )
+      ]
+    ]
+  ]
+
+  show (word
+    "TOTAL | entradas del escenario: " expected-total
+    " | programados: " length scheduled-trips
+    " | fallos: " failed-paths
+    " | coincide por zona y modo: " all-match?
+  )
+end
+
+to check-real-route-permissions-core
+  if empty? real-route-cache [
+    user-message "Primero ejecuta el setup de flujos reales."
+    stop
+  ]
+
+  let total-errors 0
+  let checked-segments 0
+
+  foreach real-route-cache [route-record ->
+    let mode-value item 0 route-record
+    let origin-zid item 1 route-record
+    let target-zid item 2 route-record
+    let current-point item 3 route-record
+    let checked-destination item 4 route-record
+    let route-path item 5 route-record
+    let route-errors 0
+
+    ifelse empty? route-path [
+      set route-errors route-errors + 1
+    ] [
+      if last route-path != checked-destination [
+        set route-errors route-errors + 1
+      ]
+
+      foreach route-path [target-point ->
+        set checked-segments checked-segments + 1
+
+        let matching-edges [my-out-edges] of current-point
+        set matching-edges matching-edges with [
+          end2 = target-point
+        ]
+
+        ifelse not any? matching-edges [
+          set route-errors route-errors + 1
+        ] [
+          let route-edge first sort matching-edges
+          let permissions [allowed-modes] of route-edge
+
+          ifelse mode-value = "bike" [
+            if not member? "bike-mixed" permissions [
+              set route-errors route-errors + 1
+            ]
+
+            if [road-type] of route-edge != "turn" and
+               not member? "bike" permissions [
+              if not member? "pedestrian" permissions [
+                set route-errors route-errors + 1
+              ]
+            ]
+          ] [
+            if not member? mode-value permissions [
+              set route-errors route-errors + 1
+            ]
+          ]
+        ]
+
+        set current-point target-point
+      ]
+    ]
+
+    if mode-value = "bike" and not empty? route-path [
+      let origin-zone first sort flow-zones with [
+        zone-id = origin-zid
+      ]
+      let target-zone first sort flow-zones with [
+        zone-id = target-zid
+      ]
+
+      let starts get-candidate-nodes-from-zone
+        origin-zone "bike" "inflow"
+      let finishes get-candidate-nodes-from-zone
+        target-zone "bike" "outflow"
+
+      let cycle-only-possible?
+        check-cycle-only-reachable? starts finishes
+
+      let full-route fput (item 3 route-record) route-path
+      let walking-m bike-path-walking-m full-route
+
+      if cycle-only-possible? and walking-m > 0.000001 [
+        set route-errors route-errors + 1
+      ]
+
+      show (word
+        "BICI " origin-zid " -> " target-zid
+        " | existe alternativa solo ciclista: "
+        cycle-only-possible?
+        " | caminar m: " precision walking-m 3
+      )
+    ]
+
+    set total-errors total-errors + route-errors
+
+    show (word
+      "RUTA " mode-value " " origin-zid " -> " target-zid
+      " | errores: " route-errors
+    )
+  ]
+
+  show (word
+    "TOTAL | rutas: " length real-route-cache
+    " | segmentos comprobados: " checked-segments
+    " | errores: " total-errors
+    " | correcto: " (total-errors = 0)
+  )
+end
+
+
+to-report check-cycle-only-reachable? [starts finishes]
+  let source-list sort starts
+  let goal-list filter [point ->
+    not member? point source-list
+  ] (sort finishes)
+
+  if empty? source-list or empty? goal-list [
+    report false
+  ]
+
+  let pending source-list
+  let seen source-list
+
+  while [not empty? pending] [
+    let current-point first pending
+    set pending but-first pending
+
+    if member? current-point goal-list [
+      report true
+    ]
+
+    let outgoing [my-out-edges] of current-point
+    let cycling-edges outgoing with [
+      member? "bike" allowed-modes
+    ]
+
+    foreach sort cycling-edges [route-edge ->
+      let neighbor [end2] of route-edge
+
+      if not member? neighbor seen [
+        set seen lput neighbor seen
+        set pending lput neighbor pending
+      ]
+    ]
+  ]
+
+  report false
+end
+
+to check-capacity-and-completion
+  if ticks != 0 or generated-vehicles != 0 or results-exported? [
+    user-message "Ejecuta primero un nuevo Setup Flow."
+    stop
+  ]
+
+  let initial-demand length scheduled-trips
+  let peak-active 0
+  let capacity-blocked-steps 0
+
+  while [not real-flow-run-ended?] [
+    let active-before count mobile-agents
+    let generated-before generated-vehicles
+    let step-start-time sim-time-seconds
+
+    go-real-flow-step
+
+    let active-after-generation
+      active-before + generated-vehicles - generated-before
+
+    set peak-active
+      max (list peak-active active-after-generation)
+
+    if not empty? scheduled-trips [
+      if item 0 first scheduled-trips <= step-start-time and
+         active-after-generation >= max-active-vehicles [
+        set capacity-blocked-steps
+          capacity-blocked-steps + 1
+      ]
+    ]
+  ]
+
+  show (word
+    "CAPACIDAD | limite: " max-active-vehicles
+    " | maximo observado: " peak-active
+    " | pasos con entradas retenidas por capacidad: "
+    capacity-blocked-steps
+  )
+
+  show (word
+    "BALANCE | programados inicialmente: " initial-demand
+    " | generados: " generated-vehicles
+    " | completados: " completed-trips
+    " | activos: " count mobile-agents
+    " | pendientes: " length scheduled-trips
+    " | fallos: " failed-paths
+  )
+
+  show (word
+    "FINALIZACION | estado: " real-flow-run-status
+    " | tiempo simulado s: " precision sim-time-seconds 3
+  )
+
+  finish-real-flow-run
+end
+
+to test-heatmap-randomness
+  let saved-setting show-encounter-heatmap?
+  let all-ok? true
+
+  foreach [true false] [setting ->
+    set show-encounter-heatmap? setting
+
+    with-local-randomness [
+      let expected-value 0
+
+      with-local-randomness [
+        set expected-value random 1000000000
+      ]
+
+      update-encounter-heatmap
+
+      let observed-value random 1000000000
+      let correct? (observed-value = expected-value)
+
+      if not correct? [
+        set all-ok? false
+      ]
+
+      show (word
+        "ALEATORIEDAD | heatmap: " setting
+        " | secuencia conservada: " correct?
+      )
+    ]
+  ]
+
+  set show-encounter-heatmap? saved-setting
+  update-encounter-heatmap
+
+  show (word
+    "TOTAL | actualizacion del heatmap no altera la secuencia: "
+    all-ok?
+  )
+end
+
+to test-roundabout-priority
+  clear-all
+
+  set seconds-per-tick 0.2
+  set deadlock-release-time 4
+  set roundabout-priority-radius 0.35
+  set right-priority-radius 0.30
+
+  let approach-point nobody
+  let entry-point nobody
+  let exit-point nobody
+  let circulating-origin nobody
+  let entering-car nobody
+  let circulating-car nobody
+
+  create-nodes 1 [
+    setxy 0 -1
+    set roundabout-node? false
+    set intersection? false
+    set approach-point self
+  ]
+
+  create-nodes 1 [
+    setxy 0 0
+    set roundabout-node? true
+    set intersection? false
+    set entry-point self
+  ]
+
+  create-nodes 1 [
+    setxy 1 0
+    set roundabout-node? true
+    set intersection? false
+    set exit-point self
+  ]
+
+  create-nodes 1 [
+    setxy -1 0
+    set roundabout-node? true
+    set intersection? false
+    set circulating-origin self
+  ]
+
+  ask approach-point [
+    create-edge-to entry-point [
+      set roundabout? false
+      set road-type "oneway"
+      set allowed-modes ["car"]
+      set road-length 1
+    ]
+  ]
+
+  ask entry-point [
+    create-edge-to exit-point [
+      set roundabout? true
+      set road-type "roundabout"
+      set allowed-modes ["car"]
+      set road-length 1
+    ]
+  ]
+
+  ask circulating-origin [
+    create-edge-to entry-point [
+      set roundabout? true
+      set road-type "roundabout"
+      set allowed-modes ["car"]
+      set road-length 1
+    ]
+  ]
+
+  create-vehicles 1 [
+    set agent-mode "car"
+    set current-node approach-point
+    set next-node entry-point
+    set previous-node nobody
+    set destination-node exit-point
+    set path (list exit-point)
+    set waiting-time 0
+    set arrived? false
+    set stopped? false
+    set roundabout-inside? false
+    setxy 0 -0.2
+    set heading 0
+    set color yellow
+    set shape "car"
+    set size 0.15
+    set entering-car self
+  ]
+
+  create-vehicles 1 [
+    set agent-mode "car"
+    set current-node circulating-origin
+    set next-node entry-point
+    set previous-node nobody
+    set destination-node exit-point
+    set path (list exit-point)
+    set waiting-time 0
+    set arrived? false
+    set stopped? false
+    set roundabout-inside? true
+    setxy -0.2 0
+    set heading 90
+    set color blue
+    set shape "car"
+    set size 0.15
+    set circulating-car self
+  ]
+
+  reset-ticks
+
+  show "PRUEBA 1 | Aproximacion con un coche dentro"
+
+  ask entering-car [
+    let blocked? traffic-priority-blocked? next-node
+
+    show (word
+      "Debe ceder: true"
+      " | resultado: " blocked?
+      " | correcto: " blocked?
+    )
+  ]
+
+  show "PRUEBA 2 | Inicio del primer enlace de rotonda"
+
+  ask entering-car [
+    move-to entry-point
+    set previous-node approach-point
+    set current-node entry-point
+    set next-node exit-point
+    set path []
+    face next-node
+
+    show (word
+      "Siguiente enlace de rotonda: "
+      (next-edge-roundabout? next-node)
+      " | considerado ya dentro: " on-roundabout?
+    )
+
+    let blocked? roundabout-entry-blocked? next-node
+
+    show (word
+      "Debe ceder antes de incorporarse: true"
+      " | resultado: " blocked?
+      " | correcto: " blocked?
+    )
+  ]
+
+  show "PRUEBA 3 | Entrada libre"
+
+  ask circulating-car [ die ]
+
+  ask entering-car [
+    set current-node approach-point
+    set next-node entry-point
+    set previous-node nobody
+    set path (list exit-point)
+    set waiting-time 0
+    setxy 0 -0.2
+    face next-node
+
+    let blocked? traffic-priority-blocked? next-node
+
+    show (word
+      "Debe ceder: false"
+      " | resultado: " blocked?
+      " | correcto: " (not blocked?)
+    )
+  ]
+
+  show "Fin del diagnostico. Ejecutar setup antes de volver al modelo."
+end
+
+to test-roundabout-movement
+  clear-all
+
+  set seconds-per-tick 0.2
+  set meters-per-netlogo-unit 21.39540387800133
+  set movement-step-size 0.03
+  set vehicle-safety-distance 0.12
+  set right-priority-radius 0.30
+  set roundabout-priority-radius 0.35
+  set deadlock-release-time 4
+  set sim-time-seconds 0
+  set bike-walking-distance-total-m 0
+
+  let test-points []
+
+  foreach [
+    [0 -1]
+    [0 0]
+    [0 0.1]
+    [1 0.1]
+    [1 0.2]
+    [2 0.2]
+    [-1 0]
+  ] [
+    coords ->
+    create-nodes 1 [
+      setxy item 0 coords item 1 coords
+      set intersection? false
+      set roundabout-node? false
+      set shape "circle"
+      set size 0.08
+      set color gray
+      set test-points lput self test-points
+    ]
+  ]
+
+  let approach-point item 0 test-points
+  let entry-point item 1 test-points
+  let ring-start item 2 test-points
+  let ring-end item 3 test-points
+  let exit-point item 4 test-points
+  let outside-point item 5 test-points
+  let blocker-origin item 6 test-points
+
+  ask (turtle-set entry-point ring-start ring-end exit-point blocker-origin) [
+    set roundabout-node? true
+  ]
+
+  foreach [
+    [0 1 "oneway"]
+    [1 2 "turn"]
+    [2 3 "roundabout"]
+    [3 4 "turn"]
+    [4 5 "oneway"]
+    [6 1 "roundabout"]
+  ] [
+    specification ->
+    let source-point item (item 0 specification) test-points
+    let target-point item (item 1 specification) test-points
+    let link-kind item 2 specification
+
+    ask source-point [
+      create-edge-to target-point [
+        set road-type link-kind
+        set roundabout? (link-kind = "roundabout")
+        set allowed-modes ["car"]
+        set road-length [distance target-point] of source-point
+        set color white
+      ]
+    ]
+  ]
+
+  let entering-car nobody
+  let circulating-car nobody
+
+  create-vehicles 1 [
+    set agent-mode "car"
+    set current-node approach-point
+    set next-node entry-point
+    set previous-node nobody
+
+    set destination-node nobody
+    set path (list ring-start ring-end exit-point outside-point)
+
+    set roundabout-inside? false
+    set arrived? false
+    set stopped? false
+    set waiting-time 0
+    set speed-factor 1
+    set speed 0.02
+    set trip-distance-m 0
+    set distance-moved-this-tick 0
+
+    setxy 0 -0.2
+    set shape "car"
+    set size 0.15
+    set color yellow
+    set entering-car self
+  ]
+
+  create-vehicles 1 [
+    set agent-mode "car"
+    set current-node blocker-origin
+    set next-node entry-point
+    set previous-node nobody
+    set destination-node nobody
+    set path []
+    set roundabout-inside? true
+    set arrived? false
+    set stopped? false
+    set waiting-time 0
+    set speed 0
+
+    setxy -0.1 0
+    set shape "car"
+    set size 0.15
+    set color blue
+    set circulating-car self
+  ]
+
+  reset-ticks
+
+  let initial-x [xcor] of entering-car
+  let initial-y [ycor] of entering-car
+
+  move.mobile-agents
+
+  let held? (
+    ([distancexy initial-x initial-y] of entering-car < 0.000001)
+    and [stopped?] of entering-car
+    and [waiting-time] of entering-car > 0
+  )
+
+  show (word
+    "MOVIMIENTO 1 | Espera con entrada ocupada"
+    " | correcto: " held?
+  )
+
+  ask circulating-car [ die ]
+
+  move.mobile-agents
+
+  let resumed? (
+    [distancexy initial-x initial-y] of entering-car > 0.000001
+  )
+
+  show (word
+    "MOVIMIENTO 2 | Avanza al quedar libre"
+    " | correcto: " resumed?
+  )
+
+  let saw-entry-turn? false
+  let entry-turn-ok? true
+  let saw-ring? false
+  let ring-ok? true
+  let saw-exit-turn? false
+  let exit-turn-ok? true
+  let saw-outside? false
+  let outside-ok? true
+  let iterations 0
+
+  while [
+    iterations < 250 and
+    [current-node] of entering-car != outside-point
+  ] [
+    move.mobile-agents
+    set sim-time-seconds sim-time-seconds + seconds-per-tick
+    tick
+    set iterations iterations + 1
+
+    ask entering-car [
+      if current-node = entry-point and next-node = ring-start [
+        if distance-moved-this-tick > 0 [
+          set saw-entry-turn? true
+          if on-roundabout? [
+            set entry-turn-ok? false
+          ]
+        ]
+      ]
+
+      if current-node = ring-start and next-node = ring-end [
+        if distance-moved-this-tick > 0 [
+          set saw-ring? true
+          if not on-roundabout? [
+            set ring-ok? false
+          ]
+        ]
+      ]
+
+      if current-node = ring-end and next-node = exit-point [
+        if distance-moved-this-tick > 0 [
+          set saw-exit-turn? true
+          if not on-roundabout? [
+            set exit-turn-ok? false
+          ]
+        ]
+      ]
+
+      if current-node = exit-point and next-node = outside-point [
+        if distance-moved-this-tick > 0 [
+          set saw-outside? true
+          if on-roundabout? [
+            set outside-ok? false
+          ]
+        ]
+      ]
+    ]
+  ]
+
+  show (word
+    "MOVIMIENTO 3 | Conector de entrada conserva estado exterior"
+    " | observado: " saw-entry-turn?
+    " | correcto: " (saw-entry-turn? and entry-turn-ok?)
+  )
+
+  show (word
+    "MOVIMIENTO 4 | Circulacion interior activa el estado"
+    " | observado: " saw-ring?
+    " | correcto: " (saw-ring? and ring-ok?)
+  )
+
+  show (word
+    "MOVIMIENTO 5 | Conector de salida conserva estado interior"
+    " | observado: " saw-exit-turn?
+    " | correcto: " (saw-exit-turn? and exit-turn-ok?)
+  )
+
+  show (word
+    "MOVIMIENTO 6 | Tramo exterior desactiva el estado"
+    " | observado: " saw-outside?
+    " | correcto: " (saw-outside? and outside-ok?)
+  )
+
+  let finished? ([current-node] of entering-car = outside-point)
+
+  show (word
+    "MOVIMIENTO 7 | Recorrido terminado"
+    " | correcto: " finished?
+  )
+
+  let all-ok? (
+    held? and resumed? and
+    saw-entry-turn? and entry-turn-ok? and
+    saw-ring? and ring-ok? and
+    saw-exit-turn? and exit-turn-ok? and
+    saw-outside? and outside-ok? and
+    finished?
+  )
+
+  show (word "TOTAL | movimiento y estados correctos: " all-ok?)
+end
+
+to check-gis-endpoint-matching
+  with-local-randomness [
+    let unmatched []
+    let checked 0
+
+    foreach gis:feature-list-of edges-dataset [feat ->
+      let road-reference gis:property-value feat "ID_"
+      let direction-value word (gis:property-value feat "ONEWAY_") ""
+      let round-value word (gis:property-value feat "ISROUND_") ""
+
+      let directions []
+
+      ifelse round-value = "true" [
+        set directions ["forward"]
+      ] [
+        if direction-value = "yes" [
+          set directions ["forward"]
+        ]
+
+        if direction-value = "" or direction-value = "no" [
+          set directions ["forward" "backward"]
+        ]
+      ]
+
+      foreach gis:vertex-lists-of feat [vertices ->
+        let locations []
+
+        foreach vertices [vertex ->
+          let location gis:location-of vertex
+
+          if not empty? location [
+            set locations lput location locations
+          ]
+        ]
+
+        set locations
+          remove-consecutive-duplicate-locations locations
+
+        if length locations >= 2 [
+          foreach (list (first locations) (last locations)) [location ->
+            let location-key coord-key location
+            let location-x item 0 location
+            let location-y item 1 location
+
+            foreach directions [direction-name ->
+              set checked checked + 1
+
+              let matches nodes with [
+                node-key = location-key and
+                lane-direction = direction-name
+              ]
+
+              if not any? matches [
+                let available nodes with [
+                  lane-direction = direction-name
+                ]
+
+                ifelse any? available [
+                  let nearest min-one-of available [
+                    distancexy location-x location-y
+                  ]
+
+                  let offset-m
+                    ([distancexy location-x location-y] of nearest) *
+                    meters-per-netlogo-unit
+
+                  set unmatched lput
+                    (list
+                      road-reference
+                      direction-name
+                      offset-m
+                      [who] of nearest
+                    )
+                    unmatched
+                ] [
+                  show (word
+                    "SIN NODOS | via: " road-reference
+                    " | sentido: " direction-name
+                  )
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+
+    ]
+
+    set unmatched sort-by [
+      [a b] -> (item 2 a) > (item 2 b)
+    ] unmatched
+    
+    set gis-endpoint-audit unmatched
+
+    show (word
+      "EXTREMOS | comprobaciones: " checked
+      " | sin coincidencia exacta: " length unmatched
+    )
+
+    foreach [0.01 1 5 10] [threshold-m ->
+      show (word
+        "Desplazamiento superior a " threshold-m " m: "
+        length (filter [
+          record -> (item 2 record) > threshold-m
+        ] unmatched)
+      )
+    ]
+
+    show "Hasta 10 casos con mayor desplazamiento:"
+
+    foreach (first-n-items 10 unmatched) [record ->
+      show (word
+        "Via: " item 0 record
+        " | sentido: " item 1 record
+        " | desplazamiento m: " precision (item 2 record) 3
+        " | nodo elegido: " item 3 record
+      )
+    ]
+  ]
+end
+
+to check-routes-with-displaced-endpoints
+  if not is-list? gis-endpoint-audit [
+    user-message "Ejecuta primero check-gis-endpoint-matching."
+    stop
+  ]
+
+  if empty? real-route-cache [
+    user-message "Primero ejecuta Setup Flow."
+    stop
+  ]
+
+  let relevant-cases filter [
+    record -> (item 2 record) > 0.01
+  ] gis-endpoint-audit
+
+  let affected-road-ids remove-duplicates
+    (map [
+      record -> word (item 0 record) ""
+    ] relevant-cases)
+
+  let routes-to-review 0
+  let used-affected-roads []
+
+  foreach real-route-cache [route-record ->
+    let transport-mode item 0 route-record
+    let origin-zone item 1 route-record
+    let target-zone item 2 route-record
+
+    let full-route
+      fput (item 3 route-record) (item 5 route-record)
+
+    let matching-roads []
+
+    (foreach (but-last full-route) (but-first full-route) [
+      [source-point target-point] ->
+
+      let matching-edges [my-out-edges] of source-point
+
+      set matching-edges matching-edges with [
+        end2 = target-point and
+        road-type != "turn"
+      ]
+
+      if any? matching-edges [
+        let route-edge first sort matching-edges
+        let road-reference
+          word ([edge-road-id] of route-edge) ""
+
+        if member? road-reference affected-road-ids [
+          set matching-roads
+            lput road-reference matching-roads
+        ]
+      ]
+    ])
+
+    set matching-roads remove-duplicates matching-roads
+
+    if not empty? matching-roads [
+      set routes-to-review routes-to-review + 1
+
+      set used-affected-roads
+        sentence used-affected-roads matching-roads
+
+      show (word
+        "REVISAR | " transport-mode
+        " | " origin-zone " -> " target-zone
+        " | vias: " matching-roads
+      )
+    ]
+  ]
+
+  set used-affected-roads
+    remove-duplicates used-affected-roads
+
+  show (word
+    "TOTAL | rutas precalculadas: " length real-route-cache
+    " | rutas que utilizan vias a revisar: " routes-to-review
+    " | vias distintas a revisar: " length used-affected-roads
+  )
+
+  foreach used-affected-roads [road-reference ->
+    let cases-for-road filter [
+      record ->
+        (word (item 0 record) "") = road-reference
+    ] relevant-cases
+
+    let maximum-offset
+      max (map [record -> item 2 record] cases-for-road)
+
+    show (word
+      "VIA UTILIZADA | identificador: " road-reference
+      " | mayor desplazamiento de sus extremos m: "
+      precision maximum-offset 3
+    )
+  ]
+end
+
+to test-trip-time-accounting
+  let saved-car-speed vehicle-speed-kmh
+
+  (foreach [0.5 2.5] [0.2 0.6] [
+    [distance-m expected-seconds] ->
+
+    clear-all
+
+    set vehicle-speed-kmh 18
+    set meters-per-netlogo-unit 21.39540387800133
+    set seconds-per-tick 0.2
+    set movement-step-size 0.03
+    set vehicle-safety-distance 0.12
+    set right-priority-radius 0.30
+    set roundabout-priority-radius 0.35
+    set deadlock-release-time 4
+
+    set copresence-distance-car-m 5
+    set copresence-distance-bike-m 3
+    set copresence-distance-pedestrian-m 2
+    set encounter-distance-m 5
+
+    set completed-trip-metrics []
+    set active-encounters []
+    set completed-encounters []
+    set next-encounter-id 1
+
+    let source-point nobody
+    let target-point nobody
+
+    create-nodes 1 [
+      setxy 0 0
+      set intersection? false
+      set roundabout-node? false
+      set source-point self
+    ]
+
+    create-nodes 1 [
+      setxy (distance-m / meters-per-netlogo-unit) 0
+      set intersection? false
+      set roundabout-node? false
+      set target-point self
+    ]
+
+    ask source-point [
+      create-edge-to target-point [
+        set allowed-modes ["car"]
+        set road-type "oneway"
+        set roundabout? false
+        set road-length distance-m / meters-per-netlogo-unit
+      ]
+    ]
+
+    create-vehicles 1 [
+      setup-mobile-agent
+        "car" source-point target-point (list target-point)
+      set speed-factor 1
+    ]
+
+    set generated-vehicles 1
+    reset-ticks
+
+    let steps 0
+
+    while [any? mobile-agents and steps < 10] [
+      go-manual
+      set steps steps + 1
+    ]
+
+    ifelse length completed-trip-metrics = 1 [
+      let record first completed-trip-metrics
+      let measured-seconds 60 * item 1 record
+
+      let classified-seconds
+        60 * sum (sublist record 4 8)
+
+      let expected-average-speed
+        3.6 * distance-m / expected-seconds
+
+      let correct? (
+        completed-trips = 1 and
+        not any? mobile-agents and
+        abs (measured-seconds - expected-seconds) < 0.000001 and
+        abs (classified-seconds - expected-seconds) < 0.000001 and
+        abs (1000 * item 3 record - distance-m) < 0.000001 and
+        abs (item 2 record - expected-average-speed) < 0.000001 and
+        abs (item 15 record - expected-seconds) < 0.000001
+      )
+
+      show (word
+        "CIERRE | distancia m: " distance-m
+        " | duracion s: " precision measured-seconds 6
+        " | tiempo clasificado s: " precision classified-seconds 6
+        " | correcto: " correct?
+      )
+    ] [
+      show (word
+        "CIERRE | distancia m: " distance-m
+        " | registros: " length completed-trip-metrics
+        " | correcto: false"
+      )
+    ]
+  ])
+
+  set vehicle-speed-kmh saved-car-speed
+  show "Fin de la prueba. Ejecutar Setup Flow para recuperar el campus."
+end
+
+to-report real-flow-run-ended?
+  report real-flow-simulation-finished? or
+    sim-time-seconds >= run-time-limit-seconds
+end
+
+to-report real-flow-run-status
+  if real-flow-simulation-finished? [
+    report "completed"
+  ]
+
+  if sim-time-seconds >= run-time-limit-seconds [
+    report "time_limit"
+  ]
+
+  report "running"
+end
+
+to test-following-gap
+  clear-all
+
+  set seconds-per-tick 0.2
+  set meters-per-netlogo-unit 21.39540387800133
+  set movement-step-size 0.03
+  set vehicle-safety-distance 0.12
+  set right-priority-radius 0.30
+  set roundabout-priority-radius 0.35
+  set deadlock-release-time 4
+
+  let source-point nobody
+  let target-point nobody
+  let follower nobody
+  let leader nobody
+
+  create-nodes 1 [
+    setxy 0 0
+    set intersection? false
+    set roundabout-node? false
+    set source-point self
+  ]
+
+  create-nodes 1 [
+    setxy 10 0
+    set intersection? false
+    set roundabout-node? false
+    set target-point self
+  ]
+
+  ask source-point [
+    create-edge-to target-point [
+      set allowed-modes ["car"]
+      set road-type "oneway"
+      set roundabout? false
+      set road-length 10
+    ]
+  ]
+
+  create-vehicles 1 [
+    setup-mobile-agent "car" source-point nobody []
+    set next-node target-point
+    set speed 0.03
+    set follower self
+  ]
+
+  create-vehicles 1 [
+    setup-mobile-agent "car" source-point nobody []
+    set next-node target-point
+    setxy 0.13 0
+    set speed 0
+    set leader self
+  ]
+
+  reset-ticks
+
+  move.mobile-agents
+
+  let first-gap [distance leader] of follower
+  let first-advance [xcor] of follower
+
+  let first-ok? (
+    abs (first-gap - vehicle-safety-distance) < 0.000001 and
+    abs (first-advance - 0.01) < 0.000001
+  )
+
+  show (word
+    "SEPARACION 1 | avance limitado al hueco"
+    " | separacion: " precision first-gap 6
+    " | correcto: " first-ok?
+  )
+
+  let held-position [xcor] of follower
+
+  repeat 10 [
+    move.mobile-agents
+  ]
+
+  let held-ok? (
+    abs ([xcor] of follower - held-position) < 0.000001
+  )
+
+  show (word
+    "SEPARACION 2 | permanece detenido sin espacio"
+    " | correcto: " held-ok?
+  )
+
+  ask leader [
+    setxy 0.25 0
+  ]
+
+  move.mobile-agents
+
+  let resumed-ok? (
+    [xcor] of follower > held-position and
+    [distance leader] of follower >=
+      vehicle-safety-distance - 0.000001
+  )
+
+  show (word
+    "SEPARACION 3 | avanza al liberarse espacio"
+    " | correcto: " resumed-ok?
+  )
+
+  ask leader [
+    setxy 1 0
+  ]
+
+  ask follower [
+    set speed 0.2
+  ]
+
+  let repeated-ok? true
+
+  repeat 30 [
+    move.mobile-agents
+
+    if [distance leader] of follower <
+       vehicle-safety-distance - 0.000001 [
+      set repeated-ok? false
+    ]
+
+    if [xcor] of follower >= [xcor] of leader [
+      set repeated-ok? false
+    ]
+  ]
+
+  show (word
+    "SEPARACION 4 | varios subpasos sin invadir la separacion"
+    " | correcto: " repeated-ok?
+  )
+
+  show (word
+    "TOTAL | seguimiento correcto: "
+    (first-ok? and held-ok? and resumed-ok? and repeated-ok?)
+  )
+
+  show "Fin de la prueba. Ejecutar Setup Flow para recuperar el campus."
+end
+
+to test-intersection-priority
+  clear-all
+
+  set seconds-per-tick 0.2
+  set meters-per-netlogo-unit 21.39540387800133
+  set right-priority-radius 0.30
+  set roundabout-priority-radius 0.35
+  set deadlock-release-time 4
+
+  let test-points []
+
+  foreach [
+    [0 -1]
+    [1 0]
+    [0 1]
+    [0 0]
+    [0 0]
+  ] [coordinates ->
+    create-nodes 1 [
+      setxy (item 0 coordinates) (item 1 coordinates)
+      set node-key coord-key coordinates
+      set intersection? false
+      set roundabout-node? false
+      set test-points lput self test-points
+    ]
+  ]
+
+  let south-point item 0 test-points
+  let east-point item 1 test-points
+  let north-point item 2 test-points
+  let junction-a item 3 test-points
+  let junction-b item 4 test-points
+
+  foreach (list
+    (list south-point junction-a)
+    (list east-point junction-b)
+    (list junction-b north-point)
+  ) [connection ->
+    let source-point item 0 connection
+    let target-point item 1 connection
+
+    ask source-point [
+      create-edge-to target-point [
+        set road-type "oneway"
+        set roundabout? false
+        set allowed-modes ["car"]
+        set road-length [distance target-point] of source-point
+      ]
+    ]
+  ]
+
+  ask junction-a [
+    create-edge-to junction-b [
+      set road-type "turn"
+      set roundabout? false
+      set allowed-modes ["car"]
+      set road-length 0.01
+    ]
+  ]
+
+  identify-traffic-nodes
+
+  let recognition-ok? (
+    [intersection?] of junction-a and
+    [intersection?] of junction-b
+  )
+
+  show (word
+    "CRUCE 1 | reconocimiento conjunto de nodos"
+    " | correcto: " recognition-ok?
+  )
+
+  let approaching-car nobody
+  let other-car nobody
+
+  create-vehicles 1 [
+    setup-mobile-agent
+      "car" south-point north-point
+      (list junction-a junction-b north-point)
+
+    set next-node junction-a
+    set path (list junction-b north-point)
+    set heading 0
+    set approaching-car self
+  ]
+
+  create-vehicles 1 [
+    setup-mobile-agent
+      "car" east-point north-point
+      (list junction-b north-point)
+
+    set next-node junction-b
+    set path (list north-point)
+    setxy 0.1 0
+    set heading 270
+    set other-car self
+  ]
+
+  let distant-ok? false
+  let near-ok? false
+  let left-ok? false
+  let free-ok? false
+
+  ask approaching-car [
+    setxy 0 -1
+    set heading 0
+
+    set distant-ok?
+      not (traffic-priority-blocked? next-node)
+
+    setxy 0 -0.2
+    set heading 0
+
+    set near-ok?
+      traffic-priority-blocked? next-node
+  ]
+
+  show (word
+    "CRUCE 2 | no cede desde lejos"
+    " | correcto: " distant-ok?
+  )
+
+  show (word
+    "CRUCE 3 | cede cerca ante agente por la derecha"
+    " | correcto: " near-ok?
+  )
+
+  ask other-car [
+    setxy -0.1 0
+  ]
+
+  ask approaching-car [
+    set left-ok?
+      not (traffic-priority-blocked? next-node)
+  ]
+
+  show (word
+    "CRUCE 4 | agente a la izquierda no activa esta regla"
+    " | correcto: " left-ok?
+  )
+
+  ask other-car [ die ]
+
+  ask approaching-car [
+    set free-ok?
+      not (traffic-priority-blocked? next-node)
+  ]
+
+  show (word
+    "CRUCE 5 | entrada libre"
+    " | correcto: " free-ok?
+  )
+
+  show (word
+    "TOTAL | prioridad de interseccion correcta: "
+    (recognition-ok? and distant-ok? and near-ok?
+      and left-ok? and free-ok?)
+  )
+
+  show "Fin de la prueba. Ejecutar Setup Flow para recuperar el campus."
+end
+
+to export-encounters
+
+  let output-file
+    (word
+      "outputs/encounters_run_"
+      run-id
+      ".csv"
+    )
+
+  file-close-all
+
+  if file-exists? output-file [
+    file-delete output-file
+  ]
+
+  file-open output-file
+
+  file-print
+    (word
+      "run_id,"
+      "seed,"
+      "demand_factor,"
+      "encounter_id,"
+      "agent_1_id,"
+      "agent_1_mode,"
+      "agent_2_id,"
+      "agent_2_mode,"
+      "start_time_s,"
+      "end_time_s,"
+      "duration_s,"
+      "start_x,"
+      "start_y,"
+      "end_x,"
+      "end_y,"
+      "minimum_distance_m"
+    )
+
+  foreach completed-encounters [
+    record ->
+
+    file-print
+      (word
+        run-id ","
+        run-seed ","
+        run-demand-factor ","
+        item 0 record ","
+        item 1 record ","
+        item 2 record ","
+        item 3 record ","
+        item 4 record ","
+        precision (item 5 record) 3 ","
+        precision (item 6 record) 3 ","
+        precision (item 7 record) 3 ","
+        precision (item 8 record) 6 ","
+        precision (item 9 record) 6 ","
+        precision (item 10 record) 6 ","
+        precision (item 11 record) 6 ","
+        precision (item 12 record) 3
+      )
+  ]
+
+  file-close
+
+  show
+    (word
+      "Encounters exported to "
+      output-file
+    )
+end
+
+to export-trip-results
+
+  let output-file
+    (word
+      "outputs/trip_results_run_"
+      run-id
+      ".csv"
+    )
+
+  file-close-all
+
+  if file-exists? output-file [
+    file-delete output-file
+  ]
+
+  file-open output-file
+
+  file-print
+    (word
+      "run_id,"
+      "seed,"
+      "demand_factor,"
+      "mode,"
+      "origin_zone,"
+      "destination_zone,"
+      "flow_slot,"
+      "scheduled_spawn_time_s,"
+      "arrival_time_s,"
+      "trajectory_duration_min,"
+      "average_speed_kmh,"
+      "trajectory_distance_km,"
+      "congestion_duration_min,"
+      "low_speed_duration_min,"
+      "intermediate_speed_duration_min,"
+      "high_speed_duration_min,"
+      "copresence_car_percentage,"
+      "copresence_bike_percentage,"
+      "copresence_pedestrian_percentage"
+    )
+
+  foreach completed-trip-metrics [
+    record ->
+
+    file-print
+      (word
+        run-id ","
+        run-seed ","
+        run-demand-factor ","
+        item 0 record ","
+        item 11 record ","
+        item 12 record ","
+        item 13 record ","
+        precision (item 14 record) 3 ","
+        precision (item 15 record) 3 ","
+        precision (item 1 record) 6 ","
+        precision (item 2 record) 6 ","
+        precision (item 3 record) 6 ","
+        precision (item 4 record) 6 ","
+        precision (item 5 record) 6 ","
+        precision (item 6 record) 6 ","
+        precision (item 7 record) 6 ","
+        precision (100 * item 8 record) 6 ","
+        precision (100 * item 9 record) 6 ","
+        precision (100 * item 10 record) 6
+      )
+  ]
+
+  file-close
+
+  show (word
+    "Trip results exported to "
+    output-file
+  )
+end
+
+to export-simulation-summary
+
+  let output-file
+    (word
+      "outputs/simulation_summary_run_"
+      run-id
+      ".csv"
+    )
+
+  file-close-all
+
+  if file-exists? output-file [
+    file-delete output-file
+  ]
+
+  file-open output-file
+
+  file-print
+    (word
+      "run_id,"
+      "seed,"
+      "demand_factor,"
+      "start_slot,"
+      "start_time,"
+      "configured_duration_min,"
+      "actual_end_time_s,"
+      "run_status,"
+      "run_time_limit_s,"
+      "active_agents_total,"
+      "pending_entries_total,"
+      "mode,"
+      "generated_agents_total,"
+      "completed_trips,"
+      "failed_paths_total,"
+      "mean_duration_min,"
+      "mean_speed_kmh,"
+      "mean_distance_km,"
+      "mean_congestion_min,"
+      "mean_low_speed_min,"
+      "mean_intermediate_speed_min,"
+      "mean_high_speed_min,"
+      "mean_copresence_car_percentage,"
+      "mean_copresence_bike_percentage,"
+      "mean_copresence_pedestrian_percentage"
+    )
+
+  let transport-modes
+    ["all" "car" "bike" "pedestrian"]
+
+  foreach transport-modes [
+    transport-mode ->
+
+    file-print
+      (word
+        run-id ","
+        run-seed ","
+        run-demand-factor ","
+        selected-flow-slot ","
+        slot-start-time selected-flow-slot ","
+        simulation-duration-minutes ","
+        precision sim-time-seconds 3 ","
+        real-flow-run-status ","
+        precision run-time-limit-seconds 3 ","
+        (count mobile-agents) ","
+        (length scheduled-trips) ","
+        transport-mode ","
+        generated-vehicles ","
+        completed-trip-count-by-mode transport-mode ","
+        failed-paths ","
+        precision
+          (average-trajectory-duration-min transport-mode)
+          6 ","
+        precision
+          (average-trajectory-speed-kmh transport-mode)
+          6 ","
+        precision
+          (average-trajectory-distance-km transport-mode)
+          6 ","
+        precision
+          (average-congestion-duration-min transport-mode)
+          6 ","
+        precision
+          (average-low-speed-duration-min transport-mode)
+          6 ","
+        precision
+          (average-intermediate-speed-duration-min transport-mode)
+          6 ","
+        precision
+          (average-high-speed-duration-min transport-mode)
+          6 ","
+        precision
+          (average-copresence-car-percentage transport-mode)
+          6 ","
+        precision
+          (average-copresence-bike-percentage transport-mode)
+          6 ","
+        precision
+          (average-copresence-pedestrian-percentage transport-mode)
+          6
+      )
+  ]
+
+  file-close
+
+  show (word
+    "Simulation summary exported to "
+    output-file
+  )
 end]]></code>
   <widgets>
-    <view x="330" wrappingAllowedX="true" y="0" frameRate="30.0" minPycor="-16" height="985" showTickCounter="true" patchSize="38.67" fontSize="10" wrappingAllowedY="true" width="985" tickCounterLabel="ticks" maxPycor="16" updateMode="1" maxPxcor="16" minPxcor="-16"></view>
+    <view x="330" wrappingAllowedX="false" y="0" frameRate="30.0" minPycor="-16" height="985" showTickCounter="true" patchSize="38.67" fontSize="10" wrappingAllowedY="false" width="985" tickCounterLabel="ticks" maxPycor="16" updateMode="1" maxPxcor="16" minPxcor="-16"></view>
     <button x="15" y="25" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="66" display="setup">setup</button>
     <button x="105" y="25" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="55" display="go">go</button>
     <button x="15" y="80" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="100">select.origin</button>
@@ -1394,13 +5544,10 @@ end]]></code>
     <button x="120" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="90">export-results
 </button>
     <button x="15" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="95" display="export.world">export.world</button>
-    <slider x="15" step="1" y="315" max="50" width="250" display="vehicle-speed-kmh" height="50" min="0" direction="Horizontal" default="25.0" variable="vehicle-speed-kmh"></slider>
+    <slider x="15" step="1" y="315" max="50" width="250" display="vehicle-speed-kmh" height="50" min="0" direction="Horizontal" default="18.0" variable="vehicle-speed-kmh"></slider>
     <slider x="15" step="1" y="375" max="25" width="250" display="number-of-vehicles" height="50" min="1" direction="Horizontal" default="10.0" variable="number-of-vehicles"></slider>
     <button x="15" y="255" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="70">demo-run
 </button>
-    <slider x="15" step="1" y="435" max="2000" width="250" display="simulation-duration-minutes" height="50" min="0" direction="Horizontal" default="10.0" variable="simulation-duration-minutes" units="min"></slider>
-    <slider x="15" step="1" y="495" max="100" width="250" display="vehicle-generation-interval-seconds" height="50" min="0" direction="Horizontal" default="5.0" variable="vehicle-generation-interval-seconds" units="seconds"></slider>
-    <slider x="15" step="1" y="555" max="100" width="250" display="max-active-vehicles" height="50" min="0" direction="Horizontal" default="50.0" variable="max-active-vehicles"></slider>
     <monitor x="15" precision="17" y="610" height="60" fontSize="11" width="100">sim-clock</monitor>
     <monitor x="120" precision="17" y="610" height="60" fontSize="11" width="100">generated-vehicles</monitor>
     <monitor x="225" precision="17" y="610" height="60" fontSize="11" width="100">completed-trips</monitor>
@@ -1408,12 +5555,98 @@ end]]></code>
     <monitor x="120" precision="17" y="675" height="60" fontSize="11" width="100">failed-paths</monitor>
     <button x="180" y="25" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="95">go-manual</button>
     <button x="220" y="195" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="96" display="create.vehicles">create.vehicles</button>
-    <chooser x="100" y="245" height="60" variable="traffic-generation-mode" current="0" width="205" display="traffic-generation-mode">
+    <chooser x="100" y="245" height="60" variable="traffic-generation-mode" current="3" width="205" display="traffic-generation-mode">
       <choice type="string" value="car"></choice>
-      <choice type="string" value="bus"></choice>
       <choice type="string" value="bike"></choice>
       <choice type="string" value="pedestrian"></choice>
       <choice type="string" value="mixed"></choice>
+    </chooser>
+    <monitor x="120" precision="17" y="825" height="60" fontSize="11" width="100" display="avg car">average-trajectory-duration-min "car"</monitor>
+    <monitor x="225" precision="17" y="825" height="60" fontSize="11" width="100" display="avg bikes">average-trajectory-duration-min "bike"</monitor>
+    <monitor x="120" precision="17" y="890" height="60" fontSize="11" width="100" display="avg pedestrian">average-trajectory-duration-min "pedestrian"</monitor>
+    <monitor x="15" precision="17" y="825" height="60" fontSize="11" width="100" display="avg all">average-trajectory-duration-min "all"</monitor>
+    <note x="135" y="800" backgroundDark="0" fontSize="12" width="65" markdown="false" height="25" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Duration
+</note>
+    <monitor x="15" precision="17" y="975" height="60" fontSize="11" width="100" display="avg all">average-trajectory-speed-kmh "all"</monitor>
+    <monitor x="120" precision="17" y="975" height="60" fontSize="11" width="100" display="avg car">average-trajectory-speed-kmh "car"</monitor>
+    <monitor x="225" precision="17" y="975" height="60" fontSize="11" width="100" display="avg bikes">average-trajectory-speed-kmh "bike"</monitor>
+    <monitor x="120" precision="17" y="1040" height="60" fontSize="11" width="100" display="avg pedestrian">average-trajectory-speed-kmh "pedestrian"</monitor>
+    <note x="140" y="955" backgroundDark="0" fontSize="12" width="55" markdown="false" height="25" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Speed
+</note>
+    <monitor x="120" precision="17" y="1125" height="60" fontSize="11" width="100" display="avg car">average-trajectory-distance-km "car"</monitor>
+    <monitor x="225" precision="17" y="1125" height="60" fontSize="11" width="100" display="avg bikes">average-trajectory-distance-km "bike"</monitor>
+    <monitor x="120" precision="17" y="1190" height="60" fontSize="11" width="100" display="avg pedestrian">average-trajectory-distance-km "pedestrian"</monitor>
+    <monitor x="15" precision="17" y="1125" height="60" fontSize="11" width="100" display="avg all">average-trajectory-distance-km "all"</monitor>
+    <note x="135" y="1105" backgroundDark="0" fontSize="12" width="65" markdown="false" height="25" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Distance</note>
+    <monitor x="1425" precision="17" y="35" height="60" fontSize="11" width="100" display="car">average-congestion-duration-min "car"</monitor>
+    <monitor x="1320" precision="17" y="35" height="60" fontSize="11" width="100" display="all">average-congestion-duration-min "all"</monitor>
+    <monitor x="1320" precision="17" y="100" height="60" fontSize="11" width="100" display="bike">average-congestion-duration-min "bike"</monitor>
+    <monitor x="1425" precision="17" y="100" height="60" fontSize="11" width="100" display="pedestrian">average-congestion-duration-min "pedestrian"</monitor>
+    <note x="1340" y="10" backgroundDark="0" fontSize="12" width="185" markdown="false" height="40" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Average Duration Congestion</note>
+    <monitor x="1320" precision="17" y="210" height="60" fontSize="11" width="100" display="all">classified-duration-total-min "all"</monitor>
+    <monitor x="1425" precision="17" y="210" height="60" fontSize="11" width="100" display="car">classified-duration-total-min "car"</monitor>
+    <monitor x="1320" precision="17" y="275" height="60" fontSize="11" width="100" display="bike">classified-duration-total-min "bike"</monitor>
+    <monitor x="1425" precision="17" y="275" height="60" fontSize="11" width="100" display="pedestrian">classified-duration-total-min "pedestrian"</monitor>
+    <monitor x="1325" precision="17" y="375" height="60" fontSize="11" width="100" display="car">precision (average-copresence-car-percentage "all") 2</monitor>
+    <monitor x="1430" precision="17" y="375" height="60" fontSize="11" width="100" display="bike">precision (average-copresence-bike-percentage "all") 2</monitor>
+    <monitor x="1325" precision="17" y="440" height="60" fontSize="11" width="100" display="pedestrian">precision (average-copresence-pedestrian-percentage "all") 2</monitor>
+    <note x="1340" y="350" backgroundDark="0" fontSize="12" width="180" markdown="false" height="40" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Copresence Time Percentage
+</note>
+    <note x="1355" y="180" backgroundDark="0" fontSize="12" width="150" markdown="false" height="25" textColorDark="-1" textColorLight="-16777216" backgroundLight="0">Traject speed duration</note>
+    <plot x="485" autoPlotX="true" yMax="10.0" autoPlotY="true" yAxis="Value" y="995" xMin="0.0" height="175" legend="false" xMax="10.0" yMin="0.0" width="230" xAxis="Simulation time min" display="Indicator plot">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="value" color="-16777216" legend="true">
+        <setup></setup>
+        <update></update>
+      </pen>
+    </plot>
+    <monitor x="725" precision="17" y="995" height="60" fontSize="11" width="100" display="Selected mean">precision selected-indicator-mean 2</monitor>
+    <monitor x="835" precision="17" y="995" height="60" fontSize="11" width="100" display="Unit">selected-indicator-unit</monitor>
+    <slider x="945" step="5" y="995" max="100" width="250" display="sliding-window-size" height="50" min="5" direction="Horizontal" default="20.0" variable="sliding-window-size"></slider>
+    <slider x="725" step="1" y="1065" max="95" width="250" display="selected-flow-slot" height="50" min="0" direction="Horizontal" default="38.0" variable="selected-flow-slot" units="slot"></slider>
+    <monitor x="725" precision="17" y="1120" height="60" fontSize="11" width="100" display="Start Time">slot-start-time selected-flow-slot</monitor>
+    <monitor x="830" precision="17" y="1120" height="60" fontSize="11" width="100" display="End Time">selected-flow-end-time</monitor>
+    <slider x="980" step="15" y="1065" max="1440" width="250" display="simulation-duration-minutes" height="50" min="15" direction="Horizontal" default="15.0" variable="simulation-duration-minutes" units="min"></slider>
+    <chooser x="335" y="1185" height="60" variable="selected-indicator" current="1" width="250" display="selected-indicator">
+      <choice type="string" value="duration"></choice>
+      <choice type="string" value="speed"></choice>
+      <choice type="string" value="distance"></choice>
+      <choice type="string" value="congestion"></choice>
+      <choice type="string" value="low-speed-duration"></choice>
+      <choice type="string" value="intermediate-speed-duration"></choice>
+      <choice type="string" value="high-speed-duration"></choice>
+      <choice type="string" value="copresence"></choice>
+    </chooser>
+    <chooser x="600" y="1185" height="60" variable="plot-view" current="0" width="250" display="plot-view">
+      <choice type="string" value="mean"></choice>
+      <choice type="string" value="sliding"></choice>
+      <choice type="string" value="histogram"></choice>
+    </chooser>
+    <chooser x="860" y="1185" height="60" variable="plot-mode" current="0" width="250" display="plot-mode">
+      <choice type="string" value="all"></choice>
+      <choice type="string" value="car"></choice>
+      <choice type="string" value="bike"></choice>
+      <choice type="string" value="pedestrian"></choice>
+    </chooser>
+    <chooser x="1120" y="1185" height="60" variable="copresence-target" current="0" width="250" display="copresence-target">
+      <choice type="string" value="car"></choice>
+      <choice type="string" value="bike"></choice>
+      <choice type="string" value="pedestrian"></choice>
+    </chooser>
+    <slider x="15" step="1" y="430" max="100" width="250" display="vehicle-generation-interval-seconds" height="50" min="0" direction="Horizontal" default="5.0" variable="vehicle-generation-interval-seconds" units="seconds"></slider>
+    <slider x="15" step="1" y="485" max="500" width="250" display="max-active-vehicles" height="50" min="0" direction="Horizontal" default="500.0" variable="max-active-vehicles"></slider>
+    <slider x="15" step="1" y="545" max="50" width="250" display="number-of-runs" height="50" min="1" direction="Horizontal" default="10.0" variable="number-of-runs"></slider>
+    <button x="15" y="750" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="75" display="Setup Flow">setup-real-flow-simulation</button>
+    <button x="95" y="750" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="75" display="Go Flow">go-real-flow</button>
+    <button x="175" y="750" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="150" display="Run multiple simulations">run-multiple-simulations</button>
+    <switch x="1325" y="520" height="40" on="true" variable="show-encounter-heatmap?" width="175" display="show-encounter-heatmap?"></switch>
+    <button x="1330" y="570" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="100" display="Clear Heatmap">clear-encounter-heatmap</button>
+    <input x="1330" multiline="false" y="620" height="60" variable="experiment-seed" type="number" width="250">2.1092026E7</input>
+    <chooser x="1330" y="690" height="60" variable="demand-factor" current="2" width="250" display="demand-factor">
+      <choice type="double" value="1.0"></choice>
+      <choice type="double" value="2.0"></choice>
+      <choice type="double" value="3.0"></choice>
     </chooser>
   </widgets>
   <info>## WHAT IS IT?

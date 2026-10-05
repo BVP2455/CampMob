@@ -1,0 +1,18 @@
+Las cajas principales resumen medias por ejecución. Cada punto es una ejecución.
+Caja: cuartiles 25–75 %, línea: mediana, bigotes: hasta 1,5 RIQ.
+Se muestran todos los puntos, incluidos los atípicos, sin duplicarlos.
+La copresencia global excluye el modo objetivo del promedio.
+Los paneles pueden tener diferentes escalas Y: comparar factores dentro del panel.
+Las estadísticas utilizan desviación estándar muestral entre repeticiones.
+Las medias se recalculan desde viajes y se contrastan con los resúmenes (tolerancia 0,000002).
+Los gráficos legacy, si se solicitan, representan viajes individuales, no medias.
+Encuentros: un registro es un episodio, no una persona ni un accidente.
+Episodios/viaje no elimina el efecto de las oportunidades de interacción.
+Mapas: celda = floor(coordenada inicial + 0,5), origen abajo, sin envoltura.
+La intensidad es el total de inicios dividido entre las repeticiones del factor.
+Se utiliza una sola escala lineal para los tres mapas, sin saturación a 20.
+No representan ocupación, duración de copresencia ni congestión.
+El CSV espacial contiene totales y medias. Las cinco celdas se eligen por factor;
+no son necesariamente las mismas en los tres escenarios. No se superpone GIS.
+Los archivos PNG son de 300 dpi y los PDF permiten exportación vectorial.
+manifest.json registra las fuentes y sus hashes para conservar la trazabilidad.
